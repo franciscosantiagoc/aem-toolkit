@@ -1,0 +1,182 @@
+{
+  "name": "aem-toolkit",
+  "displayName": "AEM Toolkit",
+  "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
+  "version": "0.1.0",
+  "publisher": "local-dev",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://local/extensiones-visual-studio"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "aem",
+    "adobe experience manager",
+    "sling",
+    "htl",
+    "sightly",
+    "maven"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/pom.xml"
+  ],
+  "main": "./out/extension.js",
+  "icon": "media/extension-icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aemToolkit",
+          "title": "AEM Toolkit",
+          "icon": "media/activitybar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aemToolkit": [
+        {
+          "id": "aemToolkitView",
+          "name": "Acciones"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "aemToolkit.compile",
+        "title": "AEM: Compilar proyecto...",
+        "category": "AEM Toolkit",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "aemToolkit.compileRepeatLast",
+        "title": "AEM: Repetir última compilación",
+        "category": "AEM Toolkit",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "aemToolkit.compileFavorite",
+        "title": "AEM: Compilar con perfil guardado...",
+        "category": "AEM Toolkit",
+        "icon": "$(star-full)"
+      },
+      {
+        "command": "aemToolkit.refreshProjectInfo",
+        "title": "AEM: Actualizar detección de proyecto",
+        "category": "AEM Toolkit",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aemToolkit.showProjectInfo",
+        "title": "AEM: Mostrar información del proyecto detectado",
+        "category": "AEM Toolkit",
+        "icon": "$(info)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "aemToolkit.compile",
+          "when": "explorerResourceIsFolder && resourceFilename =~ /^(ui\\.frontend|core|ui\\.apps|ui\\.content|all)$/",
+          "group": "navigation@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "aemToolkit.refreshProjectInfo",
+          "when": "view == aemToolkitView",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": []
+    },
+    "configuration": {
+      "title": "AEM Toolkit",
+      "properties": {
+        "aemToolkit.defaultBuildScope": {
+          "type": "string",
+          "enum": ["all", "front", "back"],
+          "default": "all",
+          "description": "Ámbito por defecto preseleccionado al abrir el asistente 'AEM: Compilar proyecto...' (Todo / Solo Front / Solo Back)."
+        },
+        "aemToolkit.defaultInstallProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Perfil Maven (-P) preseleccionado por defecto al compilar. Vacío = 'Ninguno' (solo compilar, sin instalar en ninguna instancia AEM)."
+        },
+        "aemToolkit.defaultSkipTests": {
+          "type": "boolean",
+          "default": false,
+          "description": "Si el checkbox 'Saltar tests' del asistente de compilación empieza marcado por defecto."
+        },
+        "aemToolkit.mavenExecutable": {
+          "type": "string",
+          "enum": ["auto", "mvn", "mvnw"],
+          "default": "auto",
+          "description": "Ejecutable de Maven a usar. 'auto' usa './mvnw' (o '.\\mvnw.cmd' en Windows) si existe en la raíz del proyecto, y si no, cae a 'mvn' del PATH."
+        },
+        "aemToolkit.frontBuildCommand": {
+          "type": "string",
+          "default": "npm run prod",
+          "description": "Comando ejecutado dentro de 'ui.frontend' cuando el ámbito de compilación es 'Solo Front'."
+        },
+        "aemToolkit.savedBuildProfiles": {
+          "type": "array",
+          "default": [],
+          "description": "Perfiles de compilación guardados desde el asistente (nombre, ámbito, perfil Maven, módulos, skip tests, argumentos extra). Se editan también desde 'AEM: Compilar con perfil guardado...' → 'Administrar perfiles'.",
+          "items": {
+            "type": "object"
+          }
+        },
+        "aemToolkit.componentsCreateCssJsByDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "Al crear un componente, genera archivos CSS/JS (o SASS/LESS) sin preguntar cada vez. Desactívalo para que el asistente de creación de componentes siempre pregunte."
+        },
+        "aemToolkit.maxDialogTabs": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Número máximo de pestañas (tabs) que se pueden crear al armar un diálogo de componente con pestañas."
+        },
+        "aemToolkit.defaultLocales": {
+          "type": "array",
+          "default": [],
+          "description": "Idiomas ofrecidos por defecto en el modal de i18n. Vacío = se autodetectan de las carpetas 'i18n/<idioma>' del proyecto.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "aemToolkit.namespace": {
+          "type": "string",
+          "default": "",
+          "description": "Namespace de la app AEM (carpeta bajo /apps y bajo core/.../<empresa>/<proyecto>). Vacío = se autodetecta leyendo ui.apps/src/main/content/jcr_root/apps."
+        },
+        "aemToolkit.componentsUtilsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Ruta (relativa a ui.apps/src/main/content/jcr_root/apps/<namespace>/components) donde viven los data-sly-template compartidos. Vacío = 'utils'."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.4.0"
+  }
+}
