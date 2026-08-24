@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -61,12 +61,6 @@
         "icon": "$(debug-rerun)"
       },
       {
-        "command": "aemToolkit.compileFavorite",
-        "title": "AEM: Compilar con perfil guardado...",
-        "category": "AEM Toolkit",
-        "icon": "$(star-full)"
-      },
-      {
         "command": "aemToolkit.refreshProjectInfo",
         "title": "AEM: Actualizar detección de proyecto",
         "category": "AEM Toolkit",
@@ -99,22 +93,6 @@
     "configuration": {
       "title": "AEM Toolkit",
       "properties": {
-        "aemToolkit.defaultBuildScope": {
-          "type": "string",
-          "enum": ["all", "front", "back"],
-          "default": "all",
-          "description": "Ámbito por defecto preseleccionado al abrir el asistente 'AEM: Compilar proyecto...' (Todo / Solo Front / Solo Back)."
-        },
-        "aemToolkit.defaultInstallProfile": {
-          "type": "string",
-          "default": "",
-          "description": "Perfil Maven (-P) preseleccionado por defecto al compilar. Vacío = 'Ninguno' (solo compilar, sin instalar en ninguna instancia AEM)."
-        },
-        "aemToolkit.defaultSkipTests": {
-          "type": "boolean",
-          "default": false,
-          "description": "Si el checkbox 'Saltar tests' del asistente de compilación empieza marcado por defecto."
-        },
         "aemToolkit.mavenExecutable": {
           "type": "string",
           "enum": ["auto", "mvn", "mvnw"],
@@ -126,10 +104,10 @@
           "default": "npm run dev",
           "description": "Comando ejecutado dentro de 'ui.frontend' cuando el ámbito de compilación es 'Solo Front'. Por defecto 'npm run dev' (sin minificar) para que el CSS/JS generado sea fácil de debuggear; cambia a 'npm run prod' si prefieres el build minificado."
         },
-        "aemToolkit.savedBuildProfiles": {
+        "aemToolkit.compilePresets": {
           "type": "array",
           "default": [],
-          "description": "Perfiles de compilación guardados desde el asistente (nombre, ámbito, perfil Maven, módulos, skip tests, argumentos extra). Se editan también desde 'AEM: Compilar con perfil guardado...' → 'Administrar perfiles'.",
+          "description": "Modos de compilación personalizados guardados desde el panel 'AEM: Compilar proyecto...' (nombre, modo base, perfiles marcados, skip tests de front/back, destino Author/Publish, argumentos extra). Se administran también desde ese mismo panel.",
           "items": {
             "type": "object"
           }

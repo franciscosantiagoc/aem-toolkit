@@ -16,8 +16,7 @@ const TREE: Entry[] = [
     icon: 'tools',
     children: [
       { label: 'Compilar proyecto...', commandId: 'aemToolkit.compile', icon: 'play' },
-      { label: 'Repetir última compilación', commandId: 'aemToolkit.compileRepeatLast', icon: 'debug-rerun' },
-      { label: 'Compilar con perfil guardado...', commandId: 'aemToolkit.compileFavorite', icon: 'star-full' }
+      { label: 'Repetir última compilación', commandId: 'aemToolkit.compileRepeatLast', icon: 'debug-rerun' }
     ]
   },
   {

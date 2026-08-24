@@ -1,21 +1,23 @@
 import * as vscode from 'vscode';
 
-export interface SavedBuildProfile {
+export type BaseCompileMode = 'full' | 'front' | 'back' | 'coverage-front' | 'coverage-back';
+
+export interface CompilePreset {
   name: string;
-  scope: 'all' | 'front' | 'back' | 'modules';
-  modules?: string[];
-  mavenProfile: string;
-  skipTests: boolean;
+  baseMode: BaseCompileMode;
+  profiles: string[];
+  skipFrontendTests: boolean;
+  skipBackendTests: boolean;
+  deployTarget: 'author' | 'publish' | 'none';
+  deployHost: string;
+  deployPort: string;
   extraArgs: string;
 }
 
 export interface ExtensionConfig {
-  defaultBuildScope: 'all' | 'front' | 'back';
-  defaultInstallProfile: string;
-  defaultSkipTests: boolean;
   mavenExecutable: 'auto' | 'mvn' | 'mvnw';
   frontBuildCommand: string;
-  savedBuildProfiles: SavedBuildProfile[];
+  compilePresets: CompilePreset[];
   componentsCreateCssJsByDefault: boolean;
   maxDialogTabs: number;
   defaultLocales: string[];
@@ -26,12 +28,9 @@ export interface ExtensionConfig {
 export function getConfig(scope?: vscode.Uri): ExtensionConfig {
   const cfg = vscode.workspace.getConfiguration('aemToolkit', scope);
   return {
-    defaultBuildScope: cfg.get<ExtensionConfig['defaultBuildScope']>('defaultBuildScope', 'all'),
-    defaultInstallProfile: cfg.get<string>('defaultInstallProfile', ''),
-    defaultSkipTests: cfg.get<boolean>('defaultSkipTests', false),
     mavenExecutable: cfg.get<ExtensionConfig['mavenExecutable']>('mavenExecutable', 'auto'),
     frontBuildCommand: cfg.get<string>('frontBuildCommand', 'npm run dev'),
-    savedBuildProfiles: cfg.get<SavedBuildProfile[]>('savedBuildProfiles', []),
+    compilePresets: cfg.get<CompilePreset[]>('compilePresets', []),
     componentsCreateCssJsByDefault: cfg.get<boolean>('componentsCreateCssJsByDefault', true),
     maxDialogTabs: cfg.get<number>('maxDialogTabs', 10),
     defaultLocales: cfg.get<string[]>('defaultLocales', []),
@@ -40,23 +39,18 @@ export function getConfig(scope?: vscode.Uri): ExtensionConfig {
   };
 }
 
-/** Persiste un nuevo perfil de compilación guardado (o lo reemplaza si ya existía uno con el mismo nombre). */
-export async function saveBuildProfile(profile: SavedBuildProfile, scope?: vscode.Uri): Promise<void> {
+export async function saveCompilePreset(preset: CompilePreset, scope?: vscode.Uri): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('aemToolkit', scope);
-  const current = cfg.get<SavedBuildProfile[]>('savedBuildProfiles', []);
-  const withoutSameName = current.filter((p) => p.name !== profile.name);
-  await cfg.update(
-    'savedBuildProfiles',
-    [...withoutSameName, profile],
-    vscode.ConfigurationTarget.Workspace
-  );
+  const current = cfg.get<CompilePreset[]>('compilePresets', []);
+  const withoutSameName = current.filter((p) => p.name !== preset.name);
+  await cfg.update('compilePresets', [...withoutSameName, preset], vscode.ConfigurationTarget.Workspace);
 }
 
-export async function deleteBuildProfile(name: string, scope?: vscode.Uri): Promise<void> {
+export async function deleteCompilePreset(name: string, scope?: vscode.Uri): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('aemToolkit', scope);
-  const current = cfg.get<SavedBuildProfile[]>('savedBuildProfiles', []);
+  const current = cfg.get<CompilePreset[]>('compilePresets', []);
   await cfg.update(
-    'savedBuildProfiles',
+    'compilePresets',
     current.filter((p) => p.name !== name),
     vscode.ConfigurationTarget.Workspace
   );

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { detectAemProjectsInWorkspace } from './core/projectDetector';
 import { AemToolkitTreeProvider } from './treeView';
-import { runCompileWizard, repeatLastCompile, runCompileFavorite } from './compile/compileWizard';
+import { openCompilePanel, repeatLastCompile } from './compile/compilePanel';
 
 function showProjectInfo(): void {
   const projects = detectAemProjectsInWorkspace();
@@ -15,27 +15,27 @@ function showProjectInfo(): void {
     const name = p.namespace ?? p.rootPath.split(/[\\/]/).pop() ?? p.rootPath;
     const front = p.hasFrontendModule ? 'sí' : 'no';
     const wrapper = p.hasMavenWrapper ? 'sí' : 'no';
-    return `• ${name} — módulos: [${p.modules.join(', ')}] · ui.frontend: ${front} · mvnw: ${wrapper} · perfiles: [${p.profiles
-      .map((x) => x.id)
+    const jacoco = p.hasJacoco ? 'sí' : 'no';
+    return `• ${name} — módulos: [${p.modules.join(', ')}] · ui.frontend: ${front} · mvnw: ${wrapper} · jacoco: ${jacoco} · perfiles: [${p.profiles
+      .map((x) => (x.sourceModule ? `${x.id} (${x.sourceModule})` : x.id))
       .join(', ')}]`;
   });
   vscode.window.showInformationMessage(`Proyectos AEM detectados:\n${lines.join('\n')}`, { modal: true });
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const treeProvider = new AemToolkitTreeProvider();
+
   context.subscriptions.push(
-    vscode.commands.registerCommand('aemToolkit.compile', () => runCompileWizard(context)),
+    vscode.commands.registerCommand('aemToolkit.compile', () => openCompilePanel(context)),
     vscode.commands.registerCommand('aemToolkit.compileRepeatLast', () => repeatLastCompile(context)),
-    vscode.commands.registerCommand('aemToolkit.compileFavorite', () => runCompileFavorite(context)),
     vscode.commands.registerCommand('aemToolkit.showProjectInfo', () => showProjectInfo()),
     vscode.commands.registerCommand('aemToolkit.refreshProjectInfo', () => {
       treeProvider.refresh();
       vscode.window.showInformationMessage('AEM Toolkit: detección de proyecto actualizada.');
-    })
+    }),
+    vscode.window.registerTreeDataProvider('aemToolkitView', treeProvider)
   );
-
-  const treeProvider = new AemToolkitTreeProvider();
-  context.subscriptions.push(vscode.window.registerTreeDataProvider('aemToolkitView', treeProvider));
 }
 
 export function deactivate(): void {

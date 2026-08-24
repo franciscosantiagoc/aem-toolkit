@@ -56,14 +56,19 @@ Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-
 ## 3. Detalle de las funcionalidades y decisiones de UX
 
 ### 3.1 Compilar proyecto (Bloque 1)
-Asistente por pasos (`QuickPick` encadenados, todos con buscador):
-1. **Ámbito**: Todo (front+back) / Solo Front / Solo Back / Elegir módulos específicos (multi-select con buscador sobre los `<module>` reales del pom).
-2. **Perfil de instalación**: Ninguno · `autoInstallBundle` · `autoInstallPackage` · `autoInstallPackagePublish` · Personalizado (input libre) — la lista se arma leyendo los `<profile><id>` reales del `pom.xml` raíz, así que si el proyecto tiene perfiles distintos a los de referencia, igual aparecen.
-3. **Destino Author/Publish** (solo si se eligió un perfil de instalación): Author (puerto estándar `4502`) · Publish (puerto estándar `4503`) · No aplica. Host y puerto se piden con esos valores precargados (basta Enter-Enter para usar el estándar). Si existe un perfil hermano `<perfil>Publish` (convención vista en gatesconnect-aem/gnp-solvimas/Repsol-Lubricantes) se usa automáticamente al elegir Publish; si no existe, se sobrescriben `-Daem.host`/`-Daem.port` como mejor esfuerzo y se avisa al usuario.
-4. **Saltar tests**: sí/no (default configurable).
-5. **Argumentos extra** (opcional, input libre, ej. `-o` modo offline).
-6. Opción de **guardar esta combinación** como "perfil favorito" con nombre, para repetirla en un clic desde el árbol de la extensión (el destino Author/Publish elegido queda incluido, porque ya se resolvió a perfil + argumentos concretos).
-El comando resultante se ejecuta en una **Terminal integrada de VS Code** (no un proceso oculto) para que el usuario vea el output real de Maven/npm y pueda cancelarlo.
+Panel Webview (no una cadena de QuickPicks), al estilo de una configuración de ejecución de IntelliJ: un **select de Modo** arriba y, debajo, los **perfiles Maven como checkboxes** (se pueden marcar varios a la vez, ej. `autoInstallBundle` + `autoInstallPackage` juntos — algo que un único QuickPick no permitía bien).
+
+Modos disponibles:
+1. **Completa**: front + back + tests (de back, y de front si el proyecto tiene un script de test en `ui.frontend/package.json`). Corre el reactor Maven completo y, si aplica, los tests de front después.
+2. **Solo Front**: corre `aemToolkit.frontBuildCommand` (por defecto `npm run dev`, sin Maven). Si hay script de test de front, se puede saltar con un checkbox.
+3. **Solo Back**: al elegir este modo se **desmarcan todos los checkboxes y se marcan automáticamente `autoInstallBundle` y `autoInstallPackage`** (los que existan en el proyecto). Corre con tests incluidos por defecto; el usuario puede desmarcar "Saltar tests de Back" para incluirlos, o marcarlo para saltarlos.
+4. **Test-coverage Frontend**: solo aparece habilitado si `ui.frontend/package.json` tiene un script de coverage (ej. uno que corra con `--coverage`). Lo corre y muestra el reporte (ver abajo).
+5. **Test-coverage Backend**: usa `git status --porcelain` para detectar si hubo cambios en el back desde el último commit guardado. Si los hay, compila todo el back + tests; si no, solo re-corre los tests (para no perder tiempo recompilando). Si el proyecto no tiene `jacoco-maven-plugin` configurado, se ofrece agregarlo automáticamente como un perfil `coverage` en el pom raíz (heredado por todos los módulos, igual que `autoInstallBundle`/`Package`). Al terminar, se muestra un panel con el **% de coverage de líneas por clase**, con buscador por nombre y un filtro "mostrar coverage menor a X%" para ubicar rápido los modelos con poca cobertura. Los tests no se pueden saltar en este modo (son necesarios para calcular coverage).
+6. El usuario puede **guardar el estado actual del panel como un modo personalizado con nombre** (perfiles marcados, skip tests de front/back, destino Author/Publish, argumentos extra) — aparece después en el mismo select, bajo "Modos personalizados", y se puede eliminar con el ícono 🗑.
+
+Para los modos que instalan en una instancia (Completa/Solo Back), se muestra además el **destino Author (puerto `4502`) / Publish (puerto `4503`) / No aplica**, con host/puerto precargados con esos estándares (ver perfil hermano `<perfil>Publish`, igual que antes). La detección de perfiles lee tanto el `pom.xml` raíz como los `pom.xml` de los submódulos de primer nivel (ej. `fedDev`, definido dentro de `ui.frontend/pom.xml` en gatesconnect-aem), para que ningún perfil "escondido" en un submódulo se quede fuera de la lista.
+
+La ejecución corre como una **VS Code Task** (no un simple `sendText` a una terminal) — el usuario sigue viendo el output real en un panel de terminal, pero esto permite encadenar pasos (ej. build → tests) y saber si terminó bien antes de continuar (ej. antes de leer el reporte de coverage).
 
 ### 3.2 Subir cambios de front sin compilar (Bloque 2)
 Sincroniza HTML/clientlibs/XML directo al repositorio (vía `aemsync`/`vlt`/paquete filevault, detectando cuál está disponible en el proyecto) sin pasar por Maven ni webpack. Debe respetar la ruta JCR real (`ui.apps/src/main/content/jcr_root/...`).

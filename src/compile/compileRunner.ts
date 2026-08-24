@@ -3,86 +3,136 @@ import * as path from 'path';
 import { AemProjectInfo } from '../core/projectDetector';
 import { ExtensionConfig } from '../config';
 
-export type BuildScope = 'all' | 'front' | 'back' | 'modules';
-
-export interface CompileSelection {
-  scope: BuildScope;
-  modules?: string[]; // solo cuando scope === 'modules'
-  mavenProfile: string; // '' = ninguno
-  skipTests: boolean;
-  extraArgs: string;
+export interface DeployTarget {
+  target: 'author' | 'publish' | 'none';
+  host: string;
+  port: string;
 }
-
-const TERMINAL_NAME = 'AEM Toolkit: Compilar';
 
 function resolveMavenExecutable(project: AemProjectInfo, config: ExtensionConfig): string {
   if (config.mavenExecutable === 'mvn') return 'mvn';
   if (config.mavenExecutable === 'mvnw') return process.platform === 'win32' ? '.\\mvnw.cmd' : './mvnw';
-  // auto
   if (project.hasMavenWrapper) return process.platform === 'win32' ? '.\\mvnw.cmd' : './mvnw';
   return 'mvn';
 }
 
+const AUTHOR_DEFAULT_PORT = '4502';
+const PUBLISH_DEFAULT_PORT = '4503';
+const DEFAULT_HOST = 'localhost';
+
 /**
- * Arma el comando (o comandos) de shell para la selección hecha en el asistente. Devuelve tanto
- * la carpeta de trabajo como el comando, para que el llamador decida cómo ejecutarlo (terminal
- * integrada, guardado como perfil favorito, mostrado en un preview, etc.).
+ * Resuelve el/los perfil(es) Maven finales y los argumentos -D de host/puerto a partir del
+ * destino Author/Publish elegido. Sigue la convención vista en los proyectos de referencia:
+ * un perfil hermano '<perfil>Publish' (ej. autoInstallPackage -> autoInstallPackagePublish) usa
+ * aem.publish.host/aem.publish.port; si no existe ese hermano para NINGUNO de los perfiles
+ * elegidos, se sobrescribe aem.host/aem.port directamente como mejor esfuerzo.
  */
-export function buildCompileCommand(
+export function resolveDeployArgs(
   project: AemProjectInfo,
-  selection: CompileSelection,
-  config: ExtensionConfig
+  profiles: string[],
+  deploy: DeployTarget
+): { profiles: string[]; extraArgs: string } {
+  if (deploy.target === 'none' || profiles.length === 0) return { profiles, extraArgs: '' };
+
+  const isAuthorDefault = deploy.host === DEFAULT_HOST && deploy.port === AUTHOR_DEFAULT_PORT;
+  const isPublishDefault = deploy.host === DEFAULT_HOST && deploy.port === PUBLISH_DEFAULT_PORT;
+
+  if (deploy.target === 'author') {
+    return { profiles, extraArgs: isAuthorDefault ? '' : `-Daem.host=${deploy.host} -Daem.port=${deploy.port}` };
+  }
+
+  // publish
+  const knownIds = new Set(project.profiles.map((p) => p.id));
+  const resolved = profiles.map((p) => {
+    const sibling = [...knownIds].find((id) => id.toLowerCase() === `${p}publish`.toLowerCase());
+    return sibling ?? p;
+  });
+  const anySwapped = resolved.some((p, i) => p !== profiles[i]);
+  const extraArgs = isPublishDefault
+    ? anySwapped
+      ? ''
+      : `-Daem.publish.host=${deploy.host} -Daem.publish.port=${deploy.port}`
+    : anySwapped
+    ? `-Daem.publish.host=${deploy.host} -Daem.publish.port=${deploy.port}`
+    : `-Daem.host=${deploy.host} -Daem.port=${deploy.port}`;
+  return { profiles: resolved, extraArgs };
+}
+
+export function buildMavenCommand(
+  project: AemProjectInfo,
+  config: ExtensionConfig,
+  opts: {
+    goal?: string; // por defecto 'clean install'
+    profiles: string[];
+    skipTests: boolean;
+    extraArgs: string;
+    excludeFrontend?: boolean;
+    modules?: string[];
+  }
 ): { cwd: string; command: string } {
-  if (selection.scope === 'front') {
-    return { cwd: path.join(project.rootPath, 'ui.frontend'), command: config.frontBuildCommand };
-  }
-
   const mvnExe = resolveMavenExecutable(project, config);
-  const parts: string[] = [mvnExe, 'clean', 'install'];
+  const parts: string[] = [mvnExe, ...(opts.goal ?? 'clean install').split(' ')];
 
-  if (selection.scope === 'back' && project.hasFrontendModule) {
-    parts.push('-pl', `!ui.frontend`, '-am');
-  } else if (selection.scope === 'modules' && selection.modules && selection.modules.length > 0) {
-    parts.push('-pl', selection.modules.join(','), '-am');
+  if (opts.modules && opts.modules.length > 0) {
+    parts.push('-pl', opts.modules.join(','), '-am');
+  } else if (opts.excludeFrontend && project.hasFrontendModule) {
+    parts.push('-pl', '!ui.frontend', '-am');
   }
-  // scope === 'all' compila el reactor completo, sin -pl.
 
-  if (selection.mavenProfile) {
-    parts.push(`-P${selection.mavenProfile}`);
+  if (opts.profiles.length > 0) {
+    parts.push(`-P${opts.profiles.join(',')}`);
   }
-  if (selection.skipTests) {
+  if (opts.skipTests) {
     parts.push('-DskipTests');
   }
-  if (selection.extraArgs.trim()) {
-    parts.push(selection.extraArgs.trim());
+  if (opts.extraArgs.trim()) {
+    parts.push(opts.extraArgs.trim());
   }
 
   return { cwd: project.rootPath, command: parts.join(' ') };
 }
 
-/** Reutiliza una terminal existente con el mismo nombre en vez de acumular una nueva por cada compilación. */
-function getOrCreateTerminal(): vscode.Terminal {
-  const existing = vscode.window.terminals.find((t) => t.name === TERMINAL_NAME);
-  return existing ?? vscode.window.createTerminal(TERMINAL_NAME);
+export function buildFrontendCommand(project: AemProjectInfo, command: string): { cwd: string; command: string } {
+  return { cwd: path.join(project.rootPath, 'ui.frontend'), command };
 }
 
-export function runInTerminal(cwd: string, command: string): void {
-  const terminal = getOrCreateTerminal();
-  terminal.show(true);
-  terminal.sendText(`cd "${cwd}"`);
-  terminal.sendText(command);
+const TERMINAL_NAME = 'AEM Toolkit';
+
+/**
+ * Corre un comando como una VS Code Task (no un simple 'sendText' a una terminal) para poder
+ * esperar a que termine (necesario para encadenar pasos, ej. correr tests después del build, o
+ * leer el reporte de coverage solo si el comando terminó bien). El usuario sigue viendo el
+ * output real en un panel de terminal, igual que antes.
+ */
+export function runAsTask(cwd: string, command: string, label: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const execution = new vscode.ShellExecution(command, { cwd });
+    const task = new vscode.Task(
+      { type: 'aemToolkit', task: label },
+      vscode.TaskScope.Workspace,
+      label,
+      TERMINAL_NAME,
+      execution
+    );
+    task.presentationOptions = {
+      reveal: vscode.TaskRevealKind.Always,
+      panel: vscode.TaskPanelKind.Shared,
+      clear: false,
+      echo: true
+    };
+    const disposable = vscode.tasks.onDidEndTaskProcess((e) => {
+      if (e.execution.task === task) {
+        disposable.dispose();
+        resolve(e.exitCode);
+      }
+    });
+    vscode.tasks.executeTask(task).then(undefined, () => {
+      disposable.dispose();
+      resolve(undefined);
+    });
+  });
 }
 
-export function describeSelection(selection: CompileSelection): string {
-  const scopeLabel =
-    selection.scope === 'all'
-      ? 'Todo (front+back)'
-      : selection.scope === 'front'
-      ? 'Solo Front'
-      : selection.scope === 'back'
-      ? 'Solo Back'
-      : `Módulos: ${(selection.modules ?? []).join(', ')}`;
-  const profileLabel = selection.mavenProfile ? `perfil ${selection.mavenProfile}` : 'sin perfil de instalación';
-  const testsLabel = selection.skipTests ? 'sin tests' : 'con tests';
-  return `${scopeLabel} · ${profileLabel} · ${testsLabel}${selection.extraArgs ? ` · ${selection.extraArgs}` : ''}`;
+export function describePlan(cwd: string, command: string): string {
+  return `${command}  (en ${cwd})`;
 }
