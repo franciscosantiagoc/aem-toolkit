@@ -30,7 +30,7 @@ export function getConfig(scope?: vscode.Uri): ExtensionConfig {
     defaultInstallProfile: cfg.get<string>('defaultInstallProfile', ''),
     defaultSkipTests: cfg.get<boolean>('defaultSkipTests', false),
     mavenExecutable: cfg.get<ExtensionConfig['mavenExecutable']>('mavenExecutable', 'auto'),
-    frontBuildCommand: cfg.get<string>('frontBuildCommand', 'npm run prod'),
+    frontBuildCommand: cfg.get<string>('frontBuildCommand', 'npm run dev'),
     savedBuildProfiles: cfg.get<SavedBuildProfile[]>('savedBuildProfiles', []),
     componentsCreateCssJsByDefault: cfg.get<boolean>('componentsCreateCssJsByDefault', true),
     maxDialogTabs: cfg.get<number>('maxDialogTabs', 10),

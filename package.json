@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -123,8 +123,8 @@
         },
         "aemToolkit.frontBuildCommand": {
           "type": "string",
-          "default": "npm run prod",
-          "description": "Comando ejecutado dentro de 'ui.frontend' cuando el ámbito de compilación es 'Solo Front'."
+          "default": "npm run dev",
+          "description": "Comando ejecutado dentro de 'ui.frontend' cuando el ámbito de compilación es 'Solo Front'. Por defecto 'npm run dev' (sin minificar) para que el CSS/JS generado sea fácil de debuggear; cambia a 'npm run prod' si prefieres el build minificado."
         },
         "aemToolkit.savedBuildProfiles": {
           "type": "array",
