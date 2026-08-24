@@ -59,9 +59,10 @@ Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-
 Asistente por pasos (`QuickPick` encadenados, todos con buscador):
 1. **Ámbito**: Todo (front+back) / Solo Front / Solo Back / Elegir módulos específicos (multi-select con buscador sobre los `<module>` reales del pom).
 2. **Perfil de instalación**: Ninguno · `autoInstallBundle` · `autoInstallPackage` · `autoInstallPackagePublish` · Personalizado (input libre) — la lista se arma leyendo los `<profile><id>` reales del `pom.xml` raíz, así que si el proyecto tiene perfiles distintos a los de referencia, igual aparecen.
-3. **Saltar tests**: sí/no (default configurable).
-4. **Argumentos extra** (opcional, input libre, ej. `-o` modo offline).
-5. Opción de **guardar esta combinación** como "perfil favorito" con nombre, para repetirla en un clic desde el árbol de la extensión.
+3. **Destino Author/Publish** (solo si se eligió un perfil de instalación): Author (puerto estándar `4502`) · Publish (puerto estándar `4503`) · No aplica. Host y puerto se piden con esos valores precargados (basta Enter-Enter para usar el estándar). Si existe un perfil hermano `<perfil>Publish` (convención vista en gatesconnect-aem/gnp-solvimas/Repsol-Lubricantes) se usa automáticamente al elegir Publish; si no existe, se sobrescriben `-Daem.host`/`-Daem.port` como mejor esfuerzo y se avisa al usuario.
+4. **Saltar tests**: sí/no (default configurable).
+5. **Argumentos extra** (opcional, input libre, ej. `-o` modo offline).
+6. Opción de **guardar esta combinación** como "perfil favorito" con nombre, para repetirla en un clic desde el árbol de la extensión (el destino Author/Publish elegido queda incluido, porque ya se resolvió a perfil + argumentos concretos).
 El comando resultante se ejecuta en una **Terminal integrada de VS Code** (no un proceso oculto) para que el usuario vea el output real de Maven/npm y pueda cancelarlo.
 
 ### 3.2 Subir cambios de front sin compilar (Bloque 2)

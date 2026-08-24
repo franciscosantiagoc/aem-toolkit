@@ -100,6 +100,70 @@ async function pickMavenProfile(project: AemProjectInfo, defaultProfile: string)
   return picked;
 }
 
+const DEFAULT_HOST = 'localhost';
+const AUTHOR_DEFAULT_PORT = '4502';
+const PUBLISH_DEFAULT_PORT = '4503';
+
+/**
+ * Pregunta si se instala en Author o Publish (o "no aplica") y resuelve host/puerto —
+ * precargados con los estándares de AEM (localhost:4502 / localhost:4503) para que baste con
+ * Enter-Enter si no se necesita nada distinto. Sigue la convención vista en los proyectos de
+ * referencia: el perfil "<algo>" apunta a Author vía las propiedades aem.host/aem.port del pom,
+ * y si existe un perfil hermano "<algo>Publish" (ej. autoInstallPackage -> autoInstallPackagePublish)
+ * este usa aem.publish.host/aem.publish.port para Publish. Si no existe ese hermano, se hace un
+ * mejor esfuerzo sobrescribiendo aem.host/aem.port directamente y se avisa al usuario.
+ */
+async function pickDeployTarget(
+  project: AemProjectInfo,
+  baseProfile: string
+): Promise<{ profile: string; extraArgs: string } | null | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      { label: '$(server) Author', description: `puerto estándar ${AUTHOR_DEFAULT_PORT}`, target: 'author' as const },
+      { label: '$(globe) Publish', description: `puerto estándar ${PUBLISH_DEFAULT_PORT}`, target: 'publish' as const },
+      { label: '$(circle-slash) No aplica', description: 'no tocar host/puerto, usar el perfil tal cual', target: 'none' as const }
+    ],
+    { placeHolder: '¿Instalar en Author o Publish?' }
+  );
+  if (!picked) return undefined;
+  if (picked.target === 'none') return null;
+
+  const targetLabel = picked.target === 'author' ? 'Author' : 'Publish';
+  const defaultPort = picked.target === 'author' ? AUTHOR_DEFAULT_PORT : PUBLISH_DEFAULT_PORT;
+
+  const host = await vscode.window.showInputBox({
+    prompt: `Host de ${targetLabel} (Enter para usar el estándar)`,
+    value: DEFAULT_HOST
+  });
+  if (host === undefined) return undefined;
+
+  const port = await vscode.window.showInputBox({
+    prompt: `Puerto de ${targetLabel} (Enter para usar el estándar)`,
+    value: defaultPort,
+    validateInput: (v) => (/^\d+$/.test(v.trim()) ? undefined : 'El puerto debe ser numérico')
+  });
+  if (port === undefined) return undefined;
+
+  const isDefault = host === DEFAULT_HOST && port === defaultPort;
+
+  if (picked.target === 'author') {
+    return { profile: baseProfile, extraArgs: isDefault ? '' : `-Daem.host=${host} -Daem.port=${port}` };
+  }
+
+  const siblingId = project.profiles.find((p) => p.id.toLowerCase() === `${baseProfile}publish`.toLowerCase())?.id;
+  if (siblingId) {
+    return {
+      profile: siblingId,
+      extraArgs: isDefault ? '' : `-Daem.publish.host=${host} -Daem.publish.port=${port}`
+    };
+  }
+
+  vscode.window.showWarningMessage(
+    `No se encontró un perfil "${baseProfile}Publish" en el pom. Se usará "${baseProfile}" sobrescribiendo host/puerto directamente (-Daem.host/-Daem.port) — verifica que ese perfil realmente soporte Publish en este proyecto.`
+  );
+  return { profile: baseProfile, extraArgs: `-Daem.host=${host} -Daem.port=${port}` };
+}
+
 async function pickSkipTests(defaultValue: boolean): Promise<boolean | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
@@ -121,22 +185,34 @@ export async function runCompileWizard(context: vscode.ExtensionContext): Promis
   if (!scopePick) return;
 
   let mavenProfile = '';
+  let deployExtraArgs = '';
   if (scopePick.scope !== 'front') {
     const profile = await pickMavenProfile(project, config.defaultInstallProfile);
     if (profile === undefined) return;
     mavenProfile = profile;
+
+    if (mavenProfile) {
+      const deploy = await pickDeployTarget(project, mavenProfile);
+      if (deploy === undefined) return; // canceló el paso Author/Publish
+      if (deploy) {
+        mavenProfile = deploy.profile;
+        deployExtraArgs = deploy.extraArgs;
+      }
+    }
   }
 
   const skipTests = scopePick.scope === 'front' ? false : await pickSkipTests(config.defaultSkipTests);
   if (skipTests === undefined) return;
 
-  const extraArgs =
+  const userExtraArgs =
     scopePick.scope === 'front'
       ? ''
       : (await vscode.window.showInputBox({
           prompt: 'Argumentos extra para Maven (opcional, ej. -o para modo offline)',
           placeHolder: ''
         })) ?? '';
+
+  const extraArgs = [deployExtraArgs, userExtraArgs].filter((s) => s.trim()).join(' ');
 
   const selection: CompileSelection = {
     scope: scopePick.scope,
