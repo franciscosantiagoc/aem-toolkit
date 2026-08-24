@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { detectAemProjectsInWorkspace } from './core/projectDetector';
 import { AemToolkitTreeProvider } from './treeView';
-import { openCompilePanel, repeatLastCompile } from './compile/compilePanel';
+import { CompileViewProvider, repeatLastCompile } from './compile/compilePanel';
 
 function showProjectInfo(): void {
   const projects = detectAemProjectsInWorkspace();
@@ -25,9 +25,13 @@ function showProjectInfo(): void {
 
 export function activate(context: vscode.ExtensionContext): void {
   const treeProvider = new AemToolkitTreeProvider();
+  const compileViewProvider = new CompileViewProvider(context);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('aemToolkit.compile', () => openCompilePanel(context)),
+    vscode.window.registerWebviewViewProvider(CompileViewProvider.viewType, compileViewProvider, {
+      webviewOptions: { retainContextWhenHidden: true }
+    }),
+    vscode.commands.registerCommand('aemToolkit.compile', () => compileViewProvider.show()),
     vscode.commands.registerCommand('aemToolkit.compileRepeatLast', () => repeatLastCompile(context)),
     vscode.commands.registerCommand('aemToolkit.showProjectInfo', () => showProjectInfo()),
     vscode.commands.registerCommand('aemToolkit.refreshProjectInfo', () => {

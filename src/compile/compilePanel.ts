@@ -203,45 +203,110 @@ export async function repeatLastCompile(context: vscode.ExtensionContext): Promi
   await executeResolvedRun(context, project, last.run);
 }
 
-export async function openCompilePanel(context: vscode.ExtensionContext): Promise<void> {
-  const project = await pickProject();
-  if (!project) return;
+/**
+ * Panel de compilación anclado en la barra lateral (mismo contenedor de actividad que el árbol de
+ * acciones), en vez de una pestaña de editor aparte. VS Code solo "resuelve" (crea) la webview la
+ * primera vez que el usuario la hace visible; hasta entonces mostramos un estado vacío con un botón
+ * para elegir proyecto, para no disparar el QuickPick de proyectos sin que el usuario lo haya pedido.
+ */
+export class CompileViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'aemToolkitCompileView';
 
-  const panel = vscode.window.createWebviewPanel(
-    'aemToolkitCompile',
-    `AEM: Compilar — ${project.namespace ?? path.basename(project.rootPath)}`,
-    vscode.ViewColumn.Active,
-    { enableScripts: true, retainContextWhenHidden: true }
-  );
+  private view?: vscode.WebviewView;
+  private project?: AemProjectInfo;
 
-  const refreshHtml = () => {
-    const config = getConfig(vscode.Uri.file(project.rootPath));
-    panel.webview.html = renderPanelHtml(project, config.compilePresets);
-  };
-  refreshHtml();
+  constructor(private readonly context: vscode.ExtensionContext) {}
 
-  panel.webview.onDidReceiveMessage(async (msg: any) => {
-    if (msg.type === 'run') {
-      await executeResolvedRun(context, project, msg.payload as ResolvedRun);
-      return;
-    }
-    if (msg.type === 'savePreset') {
-      const preset = msg.payload as CompilePreset;
-      if (!preset.name || !preset.name.trim()) {
-        vscode.window.showWarningMessage('Ponle un nombre al modo antes de guardarlo.');
+  resolveWebviewView(webviewView: vscode.WebviewView): void {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+
+    webviewView.webview.onDidReceiveMessage(async (msg: any) => {
+      if (msg.type === 'pickProject') {
+        await this.pickAndLoadProject();
         return;
       }
-      await saveCompilePreset(preset, vscode.Uri.file(project.rootPath));
-      vscode.window.showInformationMessage(`Modo "${preset.name}" guardado.`);
-      refreshHtml();
+      if (!this.project) return;
+      if (msg.type === 'run') {
+        await executeResolvedRun(this.context, this.project, msg.payload as ResolvedRun);
+        return;
+      }
+      if (msg.type === 'savePreset') {
+        const preset = msg.payload as CompilePreset;
+        if (!preset.name || !preset.name.trim()) {
+          vscode.window.showWarningMessage('Ponle un nombre al modo antes de guardarlo.');
+          return;
+        }
+        await saveCompilePreset(preset, vscode.Uri.file(this.project.rootPath));
+        vscode.window.showInformationMessage(`Modo "${preset.name}" guardado.`);
+        this.refreshHtml();
+        return;
+      }
+      if (msg.type === 'deletePreset') {
+        await deleteCompilePreset(msg.name as string, vscode.Uri.file(this.project.rootPath));
+        this.refreshHtml();
+        return;
+      }
+    });
+
+    if (this.project) {
+      this.refreshHtml();
+    } else {
+      webviewView.webview.html = renderEmptyHtml();
+    }
+  }
+
+  /** Invocado por el comando "AEM: Compilar proyecto..." — trae la vista al frente y (re)elige el proyecto. */
+  async show(): Promise<void> {
+    await vscode.commands.executeCommand(`${CompileViewProvider.viewType}.focus`);
+    await this.pickAndLoadProject();
+  }
+
+  private async pickAndLoadProject(): Promise<void> {
+    const project = await pickProject();
+    if (!project) {
+      if (this.view) webviewShowEmpty(this.view);
       return;
     }
-    if (msg.type === 'deletePreset') {
-      await deleteCompilePreset(msg.name as string, vscode.Uri.file(project.rootPath));
-      refreshHtml();
-      return;
-    }
-  });
+    this.project = project;
+    this.refreshHtml();
+  }
+
+  private refreshHtml(): void {
+    if (!this.view || !this.project) return;
+    const config = getConfig(vscode.Uri.file(this.project.rootPath));
+    this.view.webview.html = renderPanelHtml(this.project, config.compilePresets);
+  }
+}
+
+function webviewShowEmpty(view: vscode.WebviewView): void {
+  view.webview.html = renderEmptyHtml();
+}
+
+function renderEmptyHtml(): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 16px; }
+  p { font-size: 12px; opacity: 0.8; }
+  button {
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none;
+    padding: 7px 14px; border-radius: 3px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+</style>
+</head>
+<body>
+  <p>Elige el proyecto AEM con el que quieres trabajar para ver el panel de compilación.</p>
+  <button id="pickBtn">📁 Elegir proyecto</button>
+  <script>
+    const vscode = acquireVsCodeApi();
+    document.getElementById('pickBtn').addEventListener('click', () => vscode.postMessage({ type: 'pickProject' }));
+  </script>
+</body>
+</html>`;
 }
 
 function escapeHtml(s: string): string {
@@ -370,6 +435,35 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
   let checkedProfiles = new Set();
   let currentBaseMode = 'full';
 
+  // Perfiles que cada modo base normalmente necesita para instalar en author/publish — se marcan
+  // solos al elegir el modo (y al cargar el panel con el modo por defecto), igual que hace IntelliJ.
+  const DEFAULT_PROFILES_BY_MODE = {
+    full: ['autoInstallBundle', 'autoInstallPackage'],
+    front: [],
+    back: ['autoInstallBundle', 'autoInstallPackage'],
+    'coverage-front': [],
+    'coverage-back': ['coverage']
+  };
+
+  // Aplica TODOS los valores por defecto de un modo base: perfiles marcados, skip-tests (front/back),
+  // argumentos extra y destino de despliegue. Se llama tanto al cargar el panel como al cambiar de
+  // modo en el select, para que nunca queden valores de un modo anterior "pegados" en la UI.
+  function applyModeDefaults(baseMode) {
+    const wanted = (DEFAULT_PROFILES_BY_MODE[baseMode] || []).filter(id => allProfiles.some(p => p.id === id));
+    checkedProfiles = new Set(wanted);
+    renderProfiles(document.getElementById('profileSearch').value);
+
+    document.getElementById('skipFrontendTests').checked = false;
+    document.getElementById('skipBackendTests').checked = false;
+    document.getElementById('extraArgs').value = '';
+
+    const radios = document.getElementsByName('deploy');
+    for (const r of radios) r.checked = (r.value === 'none');
+    document.getElementById('deployHost').value = 'localhost';
+    document.getElementById('deployPort').value = '4502';
+    updateDeployVisibility();
+  }
+
   function baseModeOf(value) {
     if (value.startsWith('base:')) return value.slice(5);
     const preset = presets.find(p => 'preset:' + p.name === value);
@@ -458,11 +552,6 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
         : 'Este proyecto no tiene jacoco-maven-plugin configurado — se te ofrecerá agregarlo automáticamente al compilar.';
     }
 
-    if (baseMode === 'back') {
-      const wanted = ['autoInstallBundle', 'autoInstallPackage'].filter(id => allProfiles.some(p => p.id === id));
-      checkedProfiles = new Set(wanted);
-      renderProfiles(document.getElementById('profileSearch').value);
-    }
   }
 
   function loadPreset(preset) {
@@ -503,12 +592,12 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
   document.getElementById('modo').addEventListener('change', (e) => {
     const value = e.target.value;
     const bm = baseModeOf(value);
+    updateVisibilityForMode(bm);
     if (value.startsWith('preset:')) {
       const preset = presets.find(p => 'preset:' + p.name === value);
-      updateVisibilityForMode(preset.baseMode);
       loadPreset(preset);
     } else {
-      updateVisibilityForMode(bm);
+      applyModeDefaults(bm);
     }
   });
 
@@ -558,7 +647,7 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
   renderProfiles('');
   renderPresetList();
   updateVisibilityForMode('full');
-  updateDeployVisibility();
+  applyModeDefaults('full');
 </script>
 </body>
 </html>`;
