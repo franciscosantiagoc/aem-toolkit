@@ -189,7 +189,14 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
   );
 }
 
-export type QuickActionId = 'downloadDependencies' | 'generateSources' | 'compileSkipTests' | 'clean' | 'dependencyTree' | 'analyzeDependencies';
+export type QuickActionId =
+  | 'compileWithTests'
+  | 'downloadDependencies'
+  | 'generateSources'
+  | 'compileSkipTests'
+  | 'clean'
+  | 'dependencyTree'
+  | 'analyzeDependencies';
 
 export interface QuickActionPayload {
   action: QuickActionId;
@@ -200,9 +207,10 @@ export interface QuickActionPayload {
  * Barra de "Acciones rápidas" del panel, al estilo de los íconos de la ventana de Maven de
  * IntelliJ. Son acciones Maven puntuales (no pasan por el select de Modo) que usan los perfiles
  * que estén marcados en ese momento en la sección de checkboxes. La mayoría, igual que "Solo
- * Back", excluyen ui.frontend del reactor (-pl !ui.frontend -am) — la excepción es "Compilar sin
- * tests", que corre el reactor completo (como el ícono ▶/⊘ del panel Maven de IntelliJ: ejecuta
- * los perfiles marcados saltando los tests tanto de back como de front).
+ * Back", excluyen ui.frontend del reactor (-pl !ui.frontend -am) — las excepciones son ▶ "Compilar"
+ * y ⚡ "Compilar sin tests", que corren el reactor completo (con y sin tests respectivamente),
+ * igual que el par ▶/⊘ del panel Maven de IntelliJ: ambos ejecutan los perfiles marcados, uno con
+ * tests y el otro saltándolos (back y front).
  */
 export async function executeQuickAction(project: AemProjectInfo, payload: QuickActionPayload): Promise<void> {
   const config = getConfig(vscode.Uri.file(project.rootPath));
@@ -220,6 +228,15 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
   };
 
   switch (payload.action) {
+    case 'compileWithTests': {
+      const exit = await runGoal('clean install', 'AEM: Compilar (perfiles marcados, con tests)', {
+        skipTests: false,
+        excludeFrontend: false
+      });
+      if (exit === 0) vscode.window.showInformationMessage('✔ Compilado (con tests).');
+      else vscode.window.showErrorMessage(`La compilación terminó con errores (código ${exit}).`);
+      return;
+    }
     case 'downloadDependencies': {
       const exit = await runGoal('dependency:resolve', 'AEM: Descargar dependencias');
       if (exit === 0) vscode.window.showInformationMessage('✔ Dependencias descargadas/resueltas.');
@@ -451,12 +468,13 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
     <div class="quick-toolbar">
       <button class="quick-btn" data-action="downloadDependencies" title="Descargar dependencias (mvn dependency:resolve)">📥</button>
       <button class="quick-btn" data-action="generateSources" title="Generar sources y actualizar carpetas (mvn generate-sources)">🗂️</button>
+      <button class="quick-btn" data-action="compileWithTests" title="Compilar con los perfiles marcados abajo (reactor completo), con tests">▶</button>
       <button class="quick-btn" data-action="compileSkipTests" title="Compilar con los perfiles marcados abajo (reactor completo), saltando los tests de back y de front">⚡</button>
       <button class="quick-btn" data-action="clean" title="Limpiar (mvn clean)">🧹</button>
       <button class="quick-btn" data-action="dependencyTree" title="Ver árbol de dependencias (mvn dependency:tree)">🌳</button>
       <button class="quick-btn" data-action="analyzeDependencies" title="Analizar dependencias — declaradas sin usar / usadas sin declarar (mvn dependency:analyze)">🔍</button>
     </div>
-    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo. Descargar, generar sources, limpiar, árbol y análisis excluyen ui.frontend del reactor (igual que "Solo Back"); "Compilar sin tests" corre el reactor completo (incluye ui.frontend) saltando los tests de ambos lados.</div>
+    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo. Descargar, generar sources, limpiar, árbol y análisis excluyen ui.frontend del reactor (igual que "Solo Back"); ▶ Compilar y ⚡ Compilar sin tests corren el reactor completo (incluye ui.frontend), con y sin tests respectivamente.</div>
   </section>
 
   <section>
