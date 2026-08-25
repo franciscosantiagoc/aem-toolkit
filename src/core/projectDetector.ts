@@ -29,6 +29,10 @@ export interface AemProjectInfo {
   frontendTestScript: string | undefined;
   /** Nombre del script npm que genera coverage en ui.frontend/package.json, si existe (ej. 'test:coverage'). */
   frontendCoverageScript: string | undefined;
+  /** Versión mayor de Java que requiere el proyecto (ej. 11, 17), leída de maven.compiler.release/
+   * target/source o java.version en el pom raíz y en los poms de cada módulo (se toma la más alta
+   * encontrada). undefined si ningún pom declara una versión reconocible. */
+  requiredJavaVersion: number | undefined;
 }
 
 /**
@@ -110,6 +114,47 @@ function detectJacoco(rootPath: string, modules: string[]): boolean {
   });
 }
 
+/** "1.8" (convención vieja hasta Java 8) -> 8; "17" o "17.0" -> 17. */
+function normalizeJavaVersion(raw: string): number | undefined {
+  const parts = raw.trim().split('.');
+  if (parts[0] === '1' && parts[1]) {
+    const n = parseInt(parts[1], 10);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  const n = parseInt(parts[0], 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+const JAVA_VERSION_PATTERNS = [
+  /<maven\.compiler\.release>\s*([\d.]+)\s*<\/maven\.compiler\.release>/,
+  /<release>\s*([\d.]+)\s*<\/release>/,
+  /<maven\.compiler\.target>\s*([\d.]+)\s*<\/maven\.compiler\.target>/,
+  /<maven\.compiler\.source>\s*([\d.]+)\s*<\/maven\.compiler\.source>/,
+  /<java\.version>\s*([\d.]+)\s*<\/java\.version>/
+];
+
+/**
+ * Busca en el pom raíz y en el de cada módulo alguna declaración reconocible de versión de Java
+ * (maven.compiler.release/target/source, o la propiedad de convención java.version) y devuelve la
+ * más alta encontrada — si un solo módulo requiere una versión mayor, esa es la que necesita tener
+ * disponible el reactor completo para compilar sin errores.
+ */
+function detectRequiredJavaVersion(rootPath: string, modules: string[]): number | undefined {
+  const poms = [path.join(rootPath, 'pom.xml'), ...modules.map((m) => path.join(rootPath, m, 'pom.xml'))];
+  let max: number | undefined;
+  for (const pomPath of poms) {
+    const content = readFileSafe(pomPath);
+    if (!content) continue;
+    for (const pattern of JAVA_VERSION_PATTERNS) {
+      const match = pattern.exec(content);
+      if (!match) continue;
+      const version = normalizeJavaVersion(match[1]);
+      if (version !== undefined && (max === undefined || version > max)) max = version;
+    }
+  }
+  return max;
+}
+
 /**
  * Detecta la estructura de un proyecto AEM (arquetipo Maven multi-módulo) a partir de la carpeta
  * de un workspace de VS Code. Devuelve undefined si no se encuentra un pom.xml con <modules> en la raíz.
@@ -146,6 +191,7 @@ export function detectAemProject(rootPath: string): AemProjectInfo | undefined {
   const { testScript, coverageScript } = hasFrontendModule
     ? detectFrontendScripts(rootPath)
     : { testScript: undefined, coverageScript: undefined };
+  const requiredJavaVersion = detectRequiredJavaVersion(rootPath, modules);
 
   return {
     rootPath,
@@ -157,7 +203,8 @@ export function detectAemProject(rootPath: string): AemProjectInfo | undefined {
     componentsPath,
     hasJacoco,
     frontendTestScript: testScript,
-    frontendCoverageScript: coverageScript
+    frontendCoverageScript: coverageScript,
+    requiredJavaVersion
   };
 }
 

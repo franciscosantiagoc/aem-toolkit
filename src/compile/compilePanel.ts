@@ -3,6 +3,7 @@ import * as path from 'path';
 import { AemProjectInfo, detectAemProjectsInWorkspace } from '../core/projectDetector';
 import { getConfig, saveCompilePreset, deleteCompilePreset, CompilePreset, BaseCompileMode } from '../config';
 import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget, stopCurrentTask, wasLastRunCancelled, buildJavaEnv } from './compileRunner';
+import { resolveJavaForProject, JavaResolution, describeJavaStatus, getJavaWarningBanner } from './javaResolver';
 import { hasUncommittedChangesIn } from '../core/gitInfo';
 import { addJacocoProfile } from '../coverage/jacocoSetup';
 import { collectBackendCoverage } from '../coverage/jacocoParser';
@@ -51,12 +52,41 @@ function findProjectByRoot(rootPath: string): AemProjectInfo | undefined {
   return detectAemProjectsInWorkspace().find((p) => p.rootPath === rootPath);
 }
 
+function resolveJava(project: AemProjectInfo, config: ReturnType<typeof getConfig>): JavaResolution {
+  return resolveJavaForProject({
+    requiredMajor: project.requiredJavaVersion,
+    manualJavaHome: config.javaHome,
+    jdkSearchFolders: config.jdkSearchFolders
+  });
+}
+
+/** Antes de lanzar una Task de Maven, si se detectó un choque real entre el Java que requiere el
+ * proyecto y el que resolvería el sistema (sin que la extensión haya podido resolverlo sola),
+ * confirma con el usuario si de todas formas quiere seguir — en vez de dejar que Maven falle con
+ * un error críptico de "UnsupportedClassVersionError" sin ninguna pista de por qué. */
+async function confirmProceedDespiteJavaMismatch(resolution: JavaResolution): Promise<boolean> {
+  if (!resolution.mismatch) return true;
+  const choice = await vscode.window.showWarningMessage(
+    `El proyecto requiere Java ${resolution.requiredMajor} pero el sistema tiene Java ${resolution.systemMajor}. ¿Deseas continuar de todas formas?`,
+    { modal: true },
+    'Continuar',
+    'Configurar JDK...'
+  );
+  if (choice === 'Configurar JDK...') {
+    await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', { query: 'aemToolkit.jdkSearchFolders' });
+    return false;
+  }
+  return choice === 'Continuar';
+}
+
 export async function executeResolvedRun(context: vscode.ExtensionContext, project: AemProjectInfo, run: ResolvedRun): Promise<void> {
   const config = getConfig(vscode.Uri.file(project.rootPath));
-  const javaEnv = buildJavaEnv(config.javaHome);
+  const javaResolution = resolveJava(project, config);
+  const javaEnv = buildJavaEnv(javaResolution.resolvedHome ?? '');
   await context.workspaceState.update(LAST_RUN_KEY, { rootPath: project.rootPath, run } as LastRun);
 
   if (run.baseMode === 'full') {
+    if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
     const { profiles, extraArgs: deployArgs } = resolveDeployArgs(project, run.profiles, run.deploy);
     const combinedExtra = [deployArgs, run.extraArgs].filter(Boolean).join(' ');
     const { cwd, command } = buildMavenCommand(project, config, { profiles, skipTests: run.skipBackendTests, extraArgs: combinedExtra });
@@ -113,6 +143,7 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
   }
 
   if (run.baseMode === 'back') {
+    if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
     const { profiles, extraArgs: deployArgs } = resolveDeployArgs(project, run.profiles, run.deploy);
     const combinedExtra = [deployArgs, run.extraArgs].filter(Boolean).join(' ');
     const { cwd, command } = buildMavenCommand(project, config, {
@@ -165,6 +196,7 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
   }
 
   // coverage-back
+  if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
   const backendModules = project.modules.filter((m) => m !== 'ui.frontend');
   if (!project.hasJacoco) {
     const choice = await vscode.window.showWarningMessage(
@@ -241,7 +273,9 @@ export interface QuickActionPayload {
  */
 export async function executeQuickAction(project: AemProjectInfo, payload: QuickActionPayload): Promise<void> {
   const config = getConfig(vscode.Uri.file(project.rootPath));
-  const javaEnv = buildJavaEnv(config.javaHome);
+  const javaResolution = resolveJava(project, config);
+  const javaEnv = buildJavaEnv(javaResolution.resolvedHome ?? '');
+  if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
   const profiles = payload.profiles ?? [];
 
   const runGoal = async (goal: string, label: string, opts?: { skipTests?: boolean; excludeFrontend?: boolean }) => {
@@ -394,6 +428,10 @@ export class CompileViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       if (!this.project) return;
+      if (msg.type === 'configureJdk') {
+        await this.openJdkMenu();
+        return;
+      }
       if (msg.type === 'run') {
         await this.runBusy(() => executeResolvedRun(this.context, this.project!, msg.payload as ResolvedRun));
         return;
@@ -446,7 +484,74 @@ export class CompileViewProvider implements vscode.WebviewViewProvider {
   private refreshHtml(): void {
     if (!this.view || !this.project) return;
     const config = getConfig(vscode.Uri.file(this.project.rootPath));
-    this.view.webview.html = renderPanelHtml(this.project, config.compilePresets);
+    const javaBanner = getJavaWarningBanner(resolveJava(this.project, config));
+    this.view.webview.html = renderPanelHtml(this.project, config.compilePresets, javaBanner);
+  }
+
+  /** Menú del ícono ⚙️: detectar de nuevo, configurar carpetas de búsqueda de JDKs (máx. 2),
+   * configurar el JDK a mano, o abrir de una vez la configuración completa de la extensión. */
+  private async openJdkMenu(): Promise<void> {
+    if (!this.project) return;
+    const rootUri = vscode.Uri.file(this.project.rootPath);
+    const config = getConfig(rootUri);
+    const cfg = vscode.workspace.getConfiguration('aemToolkit', rootUri);
+
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: '$(refresh) Detectar JDK ahora', action: 'detect' as const },
+        { label: '$(folder-opened) Configurar carpetas de búsqueda de JDKs (máx. 2)...', action: 'folders' as const },
+        { label: '$(tools) Configurar JDK manualmente...', action: 'manual' as const },
+        { label: '$(gear) Abrir configuración completa de la extensión', action: 'openSettings' as const }
+      ],
+      { placeHolder: describeJavaStatus(resolveJava(this.project, config)), matchOnDescription: true }
+    );
+    if (!picked) return;
+
+    switch (picked.action) {
+      case 'detect': {
+        vscode.window.showInformationMessage(describeJavaStatus(resolveJava(this.project, getConfig(rootUri))));
+        this.refreshHtml();
+        return;
+      }
+      case 'folders': {
+        const current = config.jdkSearchFolders;
+        const first = await vscode.window.showInputBox({
+          title: 'Carpeta contenedora de JDKs #1',
+          value: current[0] ?? '',
+          placeHolder: 'ej. C:\\Program Files\\Java (contiene subcarpetas jdk-11, jdk-17, ...)'
+        });
+        if (first === undefined) return;
+        const second = await vscode.window.showInputBox({
+          title: 'Carpeta contenedora de JDKs #2 (opcional)',
+          value: current[1] ?? '',
+          placeHolder: 'Déjala vacía si no necesitas una segunda'
+        });
+        if (second === undefined) return;
+        const folders = [first, second].map((f) => f.trim()).filter(Boolean).slice(0, 2);
+        await cfg.update('jdkSearchFolders', folders, vscode.ConfigurationTarget.Workspace);
+        vscode.window.showInformationMessage('Carpetas de búsqueda de JDKs actualizadas.');
+        this.refreshHtml();
+        return;
+      }
+      case 'manual': {
+        const value = await vscode.window.showInputBox({
+          title: 'Ruta al JDK (aemToolkit.javaHome)',
+          value: config.javaHome,
+          placeHolder: 'ej. C:\\Program Files\\Java\\jdk-17 — vacío para volver a la detección automática'
+        });
+        if (value === undefined) return;
+        await cfg.update('javaHome', value.trim(), vscode.ConfigurationTarget.Workspace);
+        vscode.window.showInformationMessage(
+          value.trim() ? 'JDK configurado manualmente.' : 'JDK manual eliminado — se vuelve a la detección automática.'
+        );
+        this.refreshHtml();
+        return;
+      }
+      case 'openSettings': {
+        await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', { query: 'aemToolkit' });
+        return;
+      }
+    }
   }
 
   /**
@@ -504,7 +609,7 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
-function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): string {
+function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[], javaBanner: string | undefined): string {
   const profilesData = JSON.stringify(project.profiles).replace(/</g, '\\u003c');
   const presetsData = JSON.stringify(presets).replace(/</g, '\\u003c');
   const projectData = JSON.stringify({
@@ -561,10 +666,18 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
   .quick-btn.stop { background: var(--vscode-errorForeground, #f14c4c); border-color: var(--vscode-errorForeground, #f14c4c); color: #fff; }
   .quick-btn.stop:hover { background: var(--vscode-errorForeground, #f14c4c); filter: brightness(1.15); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .java-banner {
+    background: var(--vscode-inputValidation-warningBackground, #664d03);
+    border: 1px solid var(--vscode-inputValidation-warningBorder, #a67f00);
+    color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+    padding: 8px 10px; border-radius: 4px; font-size: 12px; margin-bottom: 14px;
+  }
 </style>
 </head>
 <body>
   <h2>AEM Toolkit — Compilar (${escapeHtml(project.namespace ?? path.basename(project.rootPath))})</h2>
+
+  ${javaBanner ? `<div class="java-banner">${escapeHtml(javaBanner)}</div>` : ''}
 
   <section>
     <label class="field-label">Acciones rápidas (estilo Maven de IntelliJ)</label>
@@ -576,8 +689,9 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
       <button class="quick-btn" data-action="clean" title="Limpiar (mvn clean)">🧹</button>
       <button class="quick-btn" data-action="dependencyTree" title="Ver árbol de dependencias (mvn dependency:tree)">🌳</button>
       <button class="quick-btn" data-action="analyzeDependencies" title="Analizar dependencias — declaradas sin usar / usadas sin declarar (mvn dependency:analyze)">🔍</button>
+      <button class="quick-btn" data-action="configureJdk" title="Configurar JDK: detectar de nuevo, carpetas de búsqueda, o a mano">⚙️</button>
     </div>
-    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo. Descargar, generar sources, limpiar, árbol y análisis excluyen ui.frontend del reactor (igual que "Solo Back"); ▶ Compilar y ⚡ Compilar sin tests corren el reactor completo (incluye ui.frontend), con y sin tests respectivamente. En un proyecto recién clonado, corre ▶ o "Completa" una vez antes de usar 📥/🗂️/🌳/🔍 — si un módulo hermano (ej. ui.frontend) nunca se compiló, esas acciones fallarán al resolver dependencias.</div>
+    <div class="hint">Usan los perfiles marcados abajo. 📥/🗂️/🧹/🌳/🔍 excluyen ui.frontend (igual que "Solo Back"); ▶/⚡ corren el reactor completo, con y sin tests. En un proyecto recién clonado, corre ▶ o "Completa" una vez antes de usar el resto. ⚙️ configura qué JDK usar.</div>
   </section>
 
   <section>
@@ -861,7 +975,9 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
   function setBusy(busy) {
     isBusy = busy;
     document.querySelectorAll('.quick-btn').forEach(b => {
-      if (b !== playBtn) b.disabled = busy;
+      // El ⚙️ queda siempre habilitado: abrir el menú de configuración de JDK no interfiere con
+      // una compilación en curso.
+      if (b !== playBtn && b.dataset.action !== 'configureJdk') b.disabled = busy;
     });
     document.getElementById('runBtn').disabled = busy;
     if (busy) {
@@ -882,6 +998,10 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
         return;
       }
       if (btn.disabled) return;
+      if (btn.dataset.action === 'configureJdk') {
+        vscode.postMessage({ type: 'configureJdk' });
+        return;
+      }
       vscode.postMessage({
         type: 'quickAction',
         payload: { action: btn.dataset.action, profiles: [...checkedProfiles] }
