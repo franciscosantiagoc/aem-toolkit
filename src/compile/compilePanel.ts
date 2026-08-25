@@ -189,6 +189,69 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
   );
 }
 
+export type QuickActionId = 'downloadDependencies' | 'generateSources' | 'compileSkipTests' | 'clean' | 'dependencyTree' | 'customGoal';
+
+export interface QuickActionPayload {
+  action: QuickActionId;
+  profiles: string[];
+  customGoal?: string;
+}
+
+/**
+ * Barra de "Acciones rápidas" del panel, al estilo de los íconos de la ventana de Maven de
+ * IntelliJ. Son acciones Maven puntuales (no pasan por el select de Modo) que usan los perfiles
+ * que estén marcados en ese momento en la sección de checkboxes. Igual que "Solo Back", excluyen
+ * ui.frontend del reactor (-pl !ui.frontend -am) para no disparar de rebote un build de webpack.
+ */
+export async function executeQuickAction(project: AemProjectInfo, payload: QuickActionPayload): Promise<void> {
+  const config = getConfig(vscode.Uri.file(project.rootPath));
+  const profiles = payload.profiles ?? [];
+
+  const runGoal = async (goal: string, label: string, skipTests = false) => {
+    const { cwd, command } = buildMavenCommand(project, config, { goal, profiles, skipTests, extraArgs: '', excludeFrontend: true });
+    return runAsTask(cwd, command, label);
+  };
+
+  switch (payload.action) {
+    case 'downloadDependencies': {
+      const exit = await runGoal('dependency:resolve', 'AEM: Descargar dependencias');
+      if (exit === 0) vscode.window.showInformationMessage('✔ Dependencias descargadas/resueltas.');
+      else vscode.window.showErrorMessage(`No se pudieron resolver todas las dependencias (código ${exit}).`);
+      return;
+    }
+    case 'generateSources': {
+      const exit = await runGoal('generate-sources', 'AEM: Generar sources');
+      if (exit === 0) vscode.window.showInformationMessage('✔ Sources generados y carpetas actualizadas.');
+      else vscode.window.showErrorMessage(`Falló la generación de sources (código ${exit}).`);
+      return;
+    }
+    case 'compileSkipTests': {
+      const exit = await runGoal('clean install', 'AEM: Compilar (perfiles marcados, sin tests)', true);
+      if (exit === 0) vscode.window.showInformationMessage('✔ Back compilado (tests salteados).');
+      else vscode.window.showErrorMessage(`El back terminó con errores (código ${exit}).`);
+      return;
+    }
+    case 'clean': {
+      const exit = await runGoal('clean', 'AEM: Limpiar (clean)');
+      if (exit === 0) vscode.window.showInformationMessage('✔ Proyecto limpiado.');
+      else vscode.window.showErrorMessage(`El clean terminó con errores (código ${exit}).`);
+      return;
+    }
+    case 'dependencyTree': {
+      await runGoal('dependency:tree', 'AEM: Árbol de dependencias');
+      return;
+    }
+    case 'customGoal': {
+      const goal = (payload.customGoal ?? '').trim();
+      if (!goal) return;
+      const exit = await runGoal(goal, `AEM: mvn ${goal}`);
+      if (exit === 0) vscode.window.showInformationMessage(`✔ "${goal}" terminó correctamente.`);
+      else vscode.window.showWarningMessage(`"${goal}" terminó con código ${exit}.`);
+      return;
+    }
+  }
+}
+
 export async function repeatLastCompile(context: vscode.ExtensionContext): Promise<void> {
   const last = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
   if (!last) {
@@ -229,6 +292,22 @@ export class CompileViewProvider implements vscode.WebviewViewProvider {
       if (!this.project) return;
       if (msg.type === 'run') {
         await executeResolvedRun(this.context, this.project, msg.payload as ResolvedRun);
+        return;
+      }
+      if (msg.type === 'quickAction') {
+        const payload = msg.payload as QuickActionPayload;
+        if (payload.action === 'customGoal') {
+          const goal = await vscode.window.showInputBox({
+            title: 'Ejecutar goal de Maven',
+            prompt: 'Se ejecuta con los perfiles actualmente marcados en el panel (excluye ui.frontend).',
+            placeHolder: 'ej. dependency:tree, help:effective-pom, versions:display-dependency-updates',
+            value: 'dependency:tree'
+          });
+          if (!goal || !goal.trim()) return;
+          await executeQuickAction(this.project, { ...payload, customGoal: goal });
+          return;
+        }
+        await executeQuickAction(this.project, payload);
         return;
       }
       if (msg.type === 'savePreset') {
@@ -359,10 +438,30 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
   .preset-item .del { cursor:pointer; opacity:0.6; }
   .preset-item .del:hover { opacity:1; color: var(--vscode-errorForeground); }
   .disabled-note { font-size: 11px; opacity: 0.6; font-style: italic; }
+  .quick-toolbar { display:flex; flex-wrap: wrap; gap:6px; margin-bottom: 6px; }
+  .quick-btn {
+    background: transparent; color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-editorWidget-border, #3c3c3c); border-radius: 4px;
+    padding: 4px 8px; font-size: 15px; line-height: 1.2; cursor: pointer;
+  }
+  .quick-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
 </style>
 </head>
 <body>
   <h2>AEM Toolkit — Compilar (${escapeHtml(project.namespace ?? path.basename(project.rootPath))})</h2>
+
+  <section>
+    <label class="field-label">Acciones rápidas (estilo Maven de IntelliJ)</label>
+    <div class="quick-toolbar">
+      <button class="quick-btn" data-action="downloadDependencies" title="Descargar dependencias (mvn dependency:resolve)">📥</button>
+      <button class="quick-btn" data-action="generateSources" title="Generar sources y actualizar carpetas (mvn generate-sources)">🗂️</button>
+      <button class="quick-btn" data-action="compileSkipTests" title="Compilar con los perfiles marcados abajo, saltando tests (mvn clean install -DskipTests)">⚡</button>
+      <button class="quick-btn" data-action="clean" title="Limpiar (mvn clean)">🧹</button>
+      <button class="quick-btn" data-action="dependencyTree" title="Ver árbol de dependencias (mvn dependency:tree)">🌳</button>
+      <button class="quick-btn" data-action="customGoal" title="Ejecutar un goal de Maven personalizado...">⚙️</button>
+    </div>
+    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo, y excluyen ui.frontend del reactor (igual que "Solo Back").</div>
+  </section>
 
   <section>
     <label class="field-label" for="modo">Modo de compilación</label>
@@ -632,6 +731,15 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
       extraArgs: document.getElementById('extraArgs').value
     };
     vscode.postMessage({ type: 'savePreset', payload: preset });
+  });
+
+  document.querySelectorAll('.quick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      vscode.postMessage({
+        type: 'quickAction',
+        payload: { action: btn.dataset.action, profiles: [...checkedProfiles] }
+      });
+    });
   });
 
   window.addEventListener('message', (event) => {

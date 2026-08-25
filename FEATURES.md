@@ -72,6 +72,16 @@ Para los modos que instalan en una instancia (Completa/Solo Back), se muestra ad
 
 La ejecución corre como una **VS Code Task** (no un simple `sendText` a una terminal) — el usuario sigue viendo el output real en un panel de terminal, pero esto permite encadenar pasos (ej. build → tests) y saber si terminó bien antes de continuar (ej. antes de leer el reporte de coverage).
 
+**Acciones rápidas (estilo ventana "Maven" de IntelliJ)**: arriba del select de Modo hay una fila de íconos para operaciones puntuales de Maven que no dependen del wizard de Modo/perfiles, igual que la barra de herramientas del panel Maven de IntelliJ:
+- 📥 Descargar dependencias (`mvn dependency:resolve`).
+- 🗂️ Generar sources y actualizar carpetas (`mvn generate-sources`).
+- ⚡ Compilar con los perfiles marcados abajo, saltando tests (`mvn clean install -DskipTests`).
+- 🧹 Limpiar (`mvn clean`).
+- 🌳 Ver árbol de dependencias (`mvn dependency:tree`).
+- ⚙️ Ejecutar un goal de Maven personalizado (pide el goal con un input box, ej. `help:effective-pom`, `versions:display-dependency-updates`, `dependency:analyze`).
+
+Todas usan los perfiles que estén marcados en ese momento en la sección "Perfiles Maven" (no el modo elegido en el select) y excluyen `ui.frontend` del reactor (`-pl !ui.frontend -am`), igual que "Solo Back", para no disparar de rebote un build de webpack al pedir algo puramente de Maven.
+
 ### 3.2 Subir cambios de front sin compilar (Bloque 2)
 Sincroniza HTML/clientlibs/XML directo al repositorio (vía `aemsync`/`vlt`/paquete filevault, detectando cuál está disponible en el proyecto) sin pasar por Maven ni webpack. Debe respetar la ruta JCR real (`ui.apps/src/main/content/jcr_root/...`).
 
