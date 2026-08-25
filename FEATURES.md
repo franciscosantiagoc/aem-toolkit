@@ -85,6 +85,8 @@ Todas usan los perfiles que estén marcados en ese momento en la sección "Perfi
 
 **Detener una compilación en curso**: mientras hay una Task de Maven/npm corriendo (lanzada desde ▶, ⚡, cualquier acción rápida, o el botón "▶ Compilar" del wizard de Modo), el ícono ▶ se transforma en un **recuadro rojo ⏹** — al pulsarlo, se llama a `TaskExecution.terminate()` sobre la Task en curso. Mientras tanto, el resto de los botones del panel quedan deshabilitados (no se pueden lanzar dos compilaciones en paralelo sobre el mismo reactor). Al terminar — bien, con error, o detenida manualmente — el ícono vuelve a ▶ y todo se re-habilita solo. Cuando se detiene manualmente, el mensaje final lo dice explícitamente ("⏹ ... detenida por el usuario.") en vez de mostrarlo como un error con código `undefined` (que es lo que reporta VS Code cuando una Task se termina a la fuerza en vez de salir sola).
 
+**JDK usado al compilar (`aemToolkit.javaHome`) — v1.1.2**: todas las Tasks de Maven que lanza el panel (▶, ⚡, y las acciones rápidas) corren en la shell integrada de VS Code (bash/Git Bash, cmd, etc.), que resuelve su propio `JAVA_HOME`/PATH — **no necesariamente el mismo JDK que un IDE como IntelliJ**, que permite fijar el JDK del proyecto de forma independiente al PATH del sistema. Si son distintos, un plugin de Maven compilado para una versión de Java más nueva que la que trae esa shell por defecto falla con `UnsupportedClassVersionError` aunque el comando `mvn` ejecutado sea idéntico al de IntelliJ (mismos goals, mismos perfiles). Con `aemToolkit.javaHome` configurado (ej. `C:\Program Files\Java\jdk-22`), la extensión antepone su carpeta `bin` al `PATH` y fija `JAVA_HOME` solo para esas Tasks, sin tocar la configuración global del sistema. Vacío (por defecto) = sin cambios, se usa lo que la shell resuelva por su cuenta.
+
 ### 3.2 Subir cambios de front sin compilar (Bloque 2) — ✅ v1.1.0
 Sincroniza archivos directo al JCR sin pasar por Maven ni webpack, usando la **API POST de Sling** directamente contra Author o Publish (sin dependencias npm nuevas: `http` nativo de Node + un multipart hecho a mano) — se descartó generar un paquete FileVault real (`vlt`/`filevault-content-package-maven-plugin`) por la complejidad de armar un ZIP de paquete a mano y por no poder probarlo contra una instancia AEM real desde este entorno.
 
@@ -178,6 +180,7 @@ Si el proyecto trae configuración de dispatcher accesible (ver carpetas `*-disp
 - `aemToolkit.sync.authorHost` / `aemToolkit.sync.authorPort`: host/puerto de la instancia Author usada por "AEM: Subir a Author" (default `localhost`/`4502`).
 - `aemToolkit.sync.publishHost` / `aemToolkit.sync.publishPort`: host/puerto de la instancia Publish usada por "AEM: Subir a Publish" (default `localhost`/`4503`).
 - `aemToolkit.sync.username`: usuario compartido para ambos destinos (default `admin`). La contraseña no vive acá — se configura con "AEM: Configurar credenciales de sincronización..." y se guarda en Secret Storage.
+- `aemToolkit.javaHome`: ruta a la carpeta del JDK que deben usar las Tasks de Maven del panel de compilar (ej. el mismo que tienes elegido en IntelliJ para el proyecto). Vacío por defecto = usa el JDK que resuelva la shell integrada de VS Code por su cuenta.
 
 ## 5. Características adicionales sugeridas (no pedidas explícitamente, para valorar)
 

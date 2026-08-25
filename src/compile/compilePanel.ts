@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { AemProjectInfo, detectAemProjectsInWorkspace } from '../core/projectDetector';
 import { getConfig, saveCompilePreset, deleteCompilePreset, CompilePreset, BaseCompileMode } from '../config';
-import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget, stopCurrentTask, wasLastRunCancelled } from './compileRunner';
+import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget, stopCurrentTask, wasLastRunCancelled, buildJavaEnv } from './compileRunner';
 import { hasUncommittedChangesIn } from '../core/gitInfo';
 import { addJacocoProfile } from '../coverage/jacocoSetup';
 import { collectBackendCoverage } from '../coverage/jacocoParser';
@@ -53,13 +53,14 @@ function findProjectByRoot(rootPath: string): AemProjectInfo | undefined {
 
 export async function executeResolvedRun(context: vscode.ExtensionContext, project: AemProjectInfo, run: ResolvedRun): Promise<void> {
   const config = getConfig(vscode.Uri.file(project.rootPath));
+  const javaEnv = buildJavaEnv(config.javaHome);
   await context.workspaceState.update(LAST_RUN_KEY, { rootPath: project.rootPath, run } as LastRun);
 
   if (run.baseMode === 'full') {
     const { profiles, extraArgs: deployArgs } = resolveDeployArgs(project, run.profiles, run.deploy);
     const combinedExtra = [deployArgs, run.extraArgs].filter(Boolean).join(' ');
     const { cwd, command } = buildMavenCommand(project, config, { profiles, skipTests: run.skipBackendTests, extraArgs: combinedExtra });
-    const exit = await runAsTask(cwd, command, 'AEM: Compilar (Completa)');
+    const exit = await runAsTask(cwd, command, 'AEM: Compilar (Completa)', javaEnv);
     if (wasLastRunCancelled()) {
       vscode.window.showWarningMessage('⏹ Compilación completa detenida por el usuario.');
       return;
@@ -120,7 +121,7 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
       extraArgs: combinedExtra,
       excludeFrontend: true
     });
-    const exit = await runAsTask(cwd, command, 'AEM: Compilar (Solo Back)');
+    const exit = await runAsTask(cwd, command, 'AEM: Compilar (Solo Back)', javaEnv);
     if (wasLastRunCancelled()) {
       vscode.window.showWarningMessage('⏹ Compilación del back detenida por el usuario.');
     } else if (exit === 0) {
@@ -191,7 +192,7 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
     excludeFrontend: true
   });
   const label = changed ? 'AEM: Coverage Back (build completo)' : 'AEM: Coverage Back (solo tests)';
-  const exit = await runAsTask(cwd, command, label);
+  const exit = await runAsTask(cwd, command, label, javaEnv);
   if (wasLastRunCancelled()) {
     vscode.window.showWarningMessage('⏹ Tests de back (coverage) detenidos por el usuario.');
     return;
@@ -240,6 +241,7 @@ export interface QuickActionPayload {
  */
 export async function executeQuickAction(project: AemProjectInfo, payload: QuickActionPayload): Promise<void> {
   const config = getConfig(vscode.Uri.file(project.rootPath));
+  const javaEnv = buildJavaEnv(config.javaHome);
   const profiles = payload.profiles ?? [];
 
   const runGoal = async (goal: string, label: string, opts?: { skipTests?: boolean; excludeFrontend?: boolean }) => {
@@ -250,7 +252,7 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
       extraArgs: '',
       excludeFrontend: opts?.excludeFrontend ?? true
     });
-    return runAsTask(cwd, command, label);
+    return runAsTask(cwd, command, label, javaEnv);
   };
 
   // "Descargar dependencias"/"Generar sources"/"Analizar dependencias" excluyen ui.frontend del

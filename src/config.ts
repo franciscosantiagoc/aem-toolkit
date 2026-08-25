@@ -23,6 +23,7 @@ export interface ExtensionConfig {
   defaultLocales: string[];
   namespace: string;
   componentsUtilsPath: string;
+  javaHome: string;
   syncAuthorHost: string;
   syncAuthorPort: string;
   syncPublishHost: string;
@@ -41,6 +42,7 @@ export function getConfig(scope?: vscode.Uri): ExtensionConfig {
     defaultLocales: cfg.get<string[]>('defaultLocales', []),
     namespace: cfg.get<string>('namespace', ''),
     componentsUtilsPath: cfg.get<string>('componentsUtilsPath', ''),
+    javaHome: cfg.get<string>('javaHome', ''),
     syncAuthorHost: cfg.get<string>('sync.authorHost', 'localhost'),
     syncAuthorPort: cfg.get<string>('sync.authorPort', '4502'),
     syncPublishHost: cfg.get<string>('sync.publishHost', 'localhost'),

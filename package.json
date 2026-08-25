@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -186,6 +186,11 @@
           "type": "string",
           "default": "",
           "description": "Ruta (relativa a ui.apps/src/main/content/jcr_root/apps/<namespace>/components) donde viven los data-sly-template compartidos. Vacío = 'utils'."
+        },
+        "aemToolkit.javaHome": {
+          "type": "string",
+          "default": "",
+          "description": "Ruta a la carpeta del JDK que debe usar Maven al compilar desde este panel (ej. 'C:\\\\Program Files\\\\Java\\\\jdk-22'), igual al que elegiste en IntelliJ para este proyecto. Configúralo si compilar desde la terminal integrada de VS Code falla con errores como 'UnsupportedClassVersionError' que no ocurren en IntelliJ — normalmente significa que la shell por defecto (bash/Git Bash, cmd) resuelve un JDK distinto al que usa tu IDE. Vacío (por defecto) = se usa el JDK que resuelva esa shell (JAVA_HOME/PATH del sistema), sin cambios."
         },
         "aemToolkit.sync.authorHost": {
           "type": "string",

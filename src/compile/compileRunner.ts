@@ -96,6 +96,29 @@ export function buildFrontendCommand(project: AemProjectInfo, command: string): 
   return { cwd: path.join(project.rootPath, 'ui.frontend'), command };
 }
 
+/**
+ * Si el usuario configuró `aemToolkit.javaHome`, arma las variables de entorno (JAVA_HOME +
+ * PATH con su carpeta bin al frente) para que la Task de Maven use ese JDK en vez del que
+ * resuelva por defecto la shell del sistema (bash/Git Bash, cmd, etc.). Esto existe porque el
+ * JDK que usa esa shell por defecto puede NO ser el mismo que usa un IDE como IntelliJ (que deja
+ * elegir el JDK del proyecto de forma independiente al PATH del sistema) — si son distintos,
+ * plugins de Maven compilados para una versión de Java más nueva que la que trae esa shell por
+ * defecto fallan con "UnsupportedClassVersionError" incluso con el mismo comando `mvn` exacto.
+ * Sin esta configuración (vacía por defecto) el comportamiento no cambia: se usa lo que la shell
+ * resuelva, igual que antes.
+ */
+export function buildJavaEnv(javaHome: string): Record<string, string> | undefined {
+  const trimmed = javaHome.trim();
+  if (!trimmed) return undefined;
+  const binDir = path.join(trimmed, 'bin');
+  const pathSep = process.platform === 'win32' ? ';' : ':';
+  return {
+    ...process.env,
+    JAVA_HOME: trimmed,
+    PATH: `${binDir}${pathSep}${process.env.PATH ?? ''}`
+  } as Record<string, string>;
+}
+
 const TERMINAL_NAME = 'AEM Toolkit';
 
 // Referencia a la Task actualmente en ejecución (si hay alguna) para poder detenerla desde el
@@ -137,9 +160,9 @@ export function wasLastRunCancelled(): boolean {
  * leer el reporte de coverage solo si el comando terminó bien). El usuario sigue viendo el
  * output real en un panel de terminal, igual que antes.
  */
-export function runAsTask(cwd: string, command: string, label: string): Promise<number | undefined> {
+export function runAsTask(cwd: string, command: string, label: string, env?: Record<string, string>): Promise<number | undefined> {
   return new Promise((resolve) => {
-    const execution = new vscode.ShellExecution(command, { cwd });
+    const execution = new vscode.ShellExecution(command, env ? { cwd, env } : { cwd });
     const task = new vscode.Task(
       { type: 'aemToolkit', task: label },
       vscode.TaskScope.Workspace,
