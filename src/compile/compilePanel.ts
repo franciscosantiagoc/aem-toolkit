@@ -189,26 +189,33 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
   );
 }
 
-export type QuickActionId = 'downloadDependencies' | 'generateSources' | 'compileSkipTests' | 'clean' | 'dependencyTree' | 'customGoal';
+export type QuickActionId = 'downloadDependencies' | 'generateSources' | 'compileSkipTests' | 'clean' | 'dependencyTree' | 'analyzeDependencies';
 
 export interface QuickActionPayload {
   action: QuickActionId;
   profiles: string[];
-  customGoal?: string;
 }
 
 /**
  * Barra de "Acciones rápidas" del panel, al estilo de los íconos de la ventana de Maven de
  * IntelliJ. Son acciones Maven puntuales (no pasan por el select de Modo) que usan los perfiles
- * que estén marcados en ese momento en la sección de checkboxes. Igual que "Solo Back", excluyen
- * ui.frontend del reactor (-pl !ui.frontend -am) para no disparar de rebote un build de webpack.
+ * que estén marcados en ese momento en la sección de checkboxes. La mayoría, igual que "Solo
+ * Back", excluyen ui.frontend del reactor (-pl !ui.frontend -am) — la excepción es "Compilar sin
+ * tests", que corre el reactor completo (como el ícono ▶/⊘ del panel Maven de IntelliJ: ejecuta
+ * los perfiles marcados saltando los tests tanto de back como de front).
  */
 export async function executeQuickAction(project: AemProjectInfo, payload: QuickActionPayload): Promise<void> {
   const config = getConfig(vscode.Uri.file(project.rootPath));
   const profiles = payload.profiles ?? [];
 
-  const runGoal = async (goal: string, label: string, skipTests = false) => {
-    const { cwd, command } = buildMavenCommand(project, config, { goal, profiles, skipTests, extraArgs: '', excludeFrontend: true });
+  const runGoal = async (goal: string, label: string, opts?: { skipTests?: boolean; excludeFrontend?: boolean }) => {
+    const { cwd, command } = buildMavenCommand(project, config, {
+      goal,
+      profiles,
+      skipTests: opts?.skipTests ?? false,
+      extraArgs: '',
+      excludeFrontend: opts?.excludeFrontend ?? true
+    });
     return runAsTask(cwd, command, label);
   };
 
@@ -226,9 +233,12 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
       return;
     }
     case 'compileSkipTests': {
-      const exit = await runGoal('clean install', 'AEM: Compilar (perfiles marcados, sin tests)', true);
-      if (exit === 0) vscode.window.showInformationMessage('✔ Back compilado (tests salteados).');
-      else vscode.window.showErrorMessage(`El back terminó con errores (código ${exit}).`);
+      const exit = await runGoal('clean install', 'AEM: Compilar (perfiles marcados, sin tests de back ni front)', {
+        skipTests: true,
+        excludeFrontend: false
+      });
+      if (exit === 0) vscode.window.showInformationMessage('✔ Compilado (tests salteados en back y front).');
+      else vscode.window.showErrorMessage(`La compilación terminó con errores (código ${exit}).`);
       return;
     }
     case 'clean': {
@@ -241,12 +251,10 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
       await runGoal('dependency:tree', 'AEM: Árbol de dependencias');
       return;
     }
-    case 'customGoal': {
-      const goal = (payload.customGoal ?? '').trim();
-      if (!goal) return;
-      const exit = await runGoal(goal, `AEM: mvn ${goal}`);
-      if (exit === 0) vscode.window.showInformationMessage(`✔ "${goal}" terminó correctamente.`);
-      else vscode.window.showWarningMessage(`"${goal}" terminó con código ${exit}.`);
+    case 'analyzeDependencies': {
+      const exit = await runGoal('dependency:analyze', 'AEM: Analizar dependencias');
+      if (exit === 0) vscode.window.showInformationMessage('✔ Análisis de dependencias terminado — revisa el reporte en la terminal (usadas sin declarar / declaradas sin usar).');
+      else vscode.window.showWarningMessage(`El análisis de dependencias terminó con código ${exit} — revisa la terminal.`);
       return;
     }
   }
@@ -295,19 +303,7 @@ export class CompileViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       if (msg.type === 'quickAction') {
-        const payload = msg.payload as QuickActionPayload;
-        if (payload.action === 'customGoal') {
-          const goal = await vscode.window.showInputBox({
-            title: 'Ejecutar goal de Maven',
-            prompt: 'Se ejecuta con los perfiles actualmente marcados en el panel (excluye ui.frontend).',
-            placeHolder: 'ej. dependency:tree, help:effective-pom, versions:display-dependency-updates',
-            value: 'dependency:tree'
-          });
-          if (!goal || !goal.trim()) return;
-          await executeQuickAction(this.project, { ...payload, customGoal: goal });
-          return;
-        }
-        await executeQuickAction(this.project, payload);
+        await executeQuickAction(this.project, msg.payload as QuickActionPayload);
         return;
       }
       if (msg.type === 'savePreset') {
@@ -455,12 +451,12 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
     <div class="quick-toolbar">
       <button class="quick-btn" data-action="downloadDependencies" title="Descargar dependencias (mvn dependency:resolve)">📥</button>
       <button class="quick-btn" data-action="generateSources" title="Generar sources y actualizar carpetas (mvn generate-sources)">🗂️</button>
-      <button class="quick-btn" data-action="compileSkipTests" title="Compilar con los perfiles marcados abajo, saltando tests (mvn clean install -DskipTests)">⚡</button>
+      <button class="quick-btn" data-action="compileSkipTests" title="Compilar con los perfiles marcados abajo (reactor completo), saltando los tests de back y de front">⚡</button>
       <button class="quick-btn" data-action="clean" title="Limpiar (mvn clean)">🧹</button>
       <button class="quick-btn" data-action="dependencyTree" title="Ver árbol de dependencias (mvn dependency:tree)">🌳</button>
-      <button class="quick-btn" data-action="customGoal" title="Ejecutar un goal de Maven personalizado...">⚙️</button>
+      <button class="quick-btn" data-action="analyzeDependencies" title="Analizar dependencias — declaradas sin usar / usadas sin declarar (mvn dependency:analyze)">🔍</button>
     </div>
-    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo, y excluyen ui.frontend del reactor (igual que "Solo Back").</div>
+    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo. Descargar, generar sources, limpiar, árbol y análisis excluyen ui.frontend del reactor (igual que "Solo Back"); "Compilar sin tests" corre el reactor completo (incluye ui.frontend) saltando los tests de ambos lados.</div>
   </section>
 
   <section>

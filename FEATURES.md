@@ -75,12 +75,12 @@ La ejecución corre como una **VS Code Task** (no un simple `sendText` a una ter
 **Acciones rápidas (estilo ventana "Maven" de IntelliJ)**: arriba del select de Modo hay una fila de íconos para operaciones puntuales de Maven que no dependen del wizard de Modo/perfiles, igual que la barra de herramientas del panel Maven de IntelliJ:
 - 📥 Descargar dependencias (`mvn dependency:resolve`).
 - 🗂️ Generar sources y actualizar carpetas (`mvn generate-sources`).
-- ⚡ Compilar con los perfiles marcados abajo, saltando tests (`mvn clean install -DskipTests`).
+- ⚡ Compilar con los perfiles marcados abajo — **reactor completo, incluye `ui.frontend`** —, saltando los tests tanto de back como de front (`mvn clean install -DskipTests`). Es el equivalente al ícono "ejecutar perfiles marcados sin tests" del panel Maven de referencia.
 - 🧹 Limpiar (`mvn clean`).
 - 🌳 Ver árbol de dependencias (`mvn dependency:tree`).
-- ⚙️ Ejecutar un goal de Maven personalizado (pide el goal con un input box, ej. `help:effective-pom`, `versions:display-dependency-updates`, `dependency:analyze`).
+- 🔍 Analizar dependencias — declaradas sin usar / usadas sin declarar (`mvn dependency:analyze`), igual que "Analyze Dependencies" en IntelliJ.
 
-Todas usan los perfiles que estén marcados en ese momento en la sección "Perfiles Maven" (no el modo elegido en el select) y excluyen `ui.frontend` del reactor (`-pl !ui.frontend -am`), igual que "Solo Back", para no disparar de rebote un build de webpack al pedir algo puramente de Maven.
+Todas usan los perfiles que estén marcados en ese momento en la sección "Perfiles Maven" (no el modo elegido en el select). Descargar dependencias, generar sources, limpiar, árbol y análisis de dependencias excluyen `ui.frontend` del reactor (`-pl !ui.frontend -am`), igual que "Solo Back", para no disparar de rebote un build de webpack al pedir algo puramente de Maven — la única excepción es "Compilar sin tests", que sí incluye `ui.frontend` a propósito (ver arriba).
 
 ### 3.2 Subir cambios de front sin compilar (Bloque 2)
 Sincroniza HTML/clientlibs/XML directo al repositorio (vía `aemsync`/`vlt`/paquete filevault, detectando cuál está disponible en el proyecto) sin pasar por Maven ni webpack. Debe respetar la ruta JCR real (`ui.apps/src/main/content/jcr_root/...`).
