@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { AemProjectInfo, detectAemProjectsInWorkspace } from '../core/projectDetector';
 import { getConfig, saveCompilePreset, deleteCompilePreset, CompilePreset, BaseCompileMode } from '../config';
-import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget } from './compileRunner';
+import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget, stopCurrentTask } from './compileRunner';
 import { hasUncommittedChangesIn } from '../core/gitInfo';
 import { addJacocoProfile } from '../coverage/jacocoSetup';
 import { collectBackendCoverage } from '../coverage/jacocoParser';
@@ -302,6 +302,7 @@ export class CompileViewProvider implements vscode.WebviewViewProvider {
 
   private view?: vscode.WebviewView;
   private project?: AemProjectInfo;
+  private busy = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -314,13 +315,17 @@ export class CompileViewProvider implements vscode.WebviewViewProvider {
         await this.pickAndLoadProject();
         return;
       }
+      if (msg.type === 'stopTask') {
+        stopCurrentTask();
+        return;
+      }
       if (!this.project) return;
       if (msg.type === 'run') {
-        await executeResolvedRun(this.context, this.project, msg.payload as ResolvedRun);
+        await this.runBusy(() => executeResolvedRun(this.context, this.project!, msg.payload as ResolvedRun));
         return;
       }
       if (msg.type === 'quickAction') {
-        await executeQuickAction(this.project, msg.payload as QuickActionPayload);
+        await this.runBusy(() => executeQuickAction(this.project!, msg.payload as QuickActionPayload));
         return;
       }
       if (msg.type === 'savePreset') {
@@ -368,6 +373,26 @@ export class CompileViewProvider implements vscode.WebviewViewProvider {
     if (!this.view || !this.project) return;
     const config = getConfig(vscode.Uri.file(this.project.rootPath));
     this.view.webview.html = renderPanelHtml(this.project, config.compilePresets);
+  }
+
+  /**
+   * Envuelve una corrida (▶ Compilar, ⚡ Compilar sin tests, o cualquier acción rápida) para avisar
+   * al webview cuándo empieza y termina — así el ícono ▶ puede convertirse en ⏹ mientras corre y
+   * el resto de los botones se deshabilitan para no lanzar dos compilaciones a la vez.
+   */
+  private async runBusy(fn: () => Promise<void>): Promise<void> {
+    if (this.busy) {
+      vscode.window.showWarningMessage('Ya hay una compilación en curso — espera a que termine o detenla primero.');
+      return;
+    }
+    this.busy = true;
+    this.view?.webview.postMessage({ type: 'busy', busy: true });
+    try {
+      await fn();
+    } finally {
+      this.busy = false;
+      this.view?.webview.postMessage({ type: 'busy', busy: false });
+    }
   }
 }
 
@@ -458,6 +483,10 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
     padding: 4px 8px; font-size: 15px; line-height: 1.2; cursor: pointer;
   }
   .quick-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
+  .quick-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .quick-btn.stop { background: var(--vscode-errorForeground, #f14c4c); border-color: var(--vscode-errorForeground, #f14c4c); color: #fff; }
+  .quick-btn.stop:hover { background: var(--vscode-errorForeground, #f14c4c); filter: brightness(1.15); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -747,8 +776,38 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
     vscode.postMessage({ type: 'savePreset', payload: preset });
   });
 
+  // El ícono ▶ (compileWithTests) hace doble función: mientras no hay nada corriendo, lanza una
+  // compilación; mientras hay una corriendo, se convierte en ⏹ (recuadro rojo) para detenerla. El
+  // resto de los botones (otras acciones rápidas + el ▶ Compilar del wizard) se deshabilitan
+  // mientras tanto para no lanzar dos compilaciones a la vez.
+  let isBusy = false;
+  const playBtn = document.querySelector('.quick-btn[data-action="compileWithTests"]');
+  const PLAY_TITLE = playBtn.title;
+
+  function setBusy(busy) {
+    isBusy = busy;
+    document.querySelectorAll('.quick-btn').forEach(b => {
+      if (b !== playBtn) b.disabled = busy;
+    });
+    document.getElementById('runBtn').disabled = busy;
+    if (busy) {
+      playBtn.textContent = '⏹';
+      playBtn.classList.add('stop');
+      playBtn.title = 'Detener la compilación en curso';
+    } else {
+      playBtn.textContent = '▶';
+      playBtn.classList.remove('stop');
+      playBtn.title = PLAY_TITLE;
+    }
+  }
+
   document.querySelectorAll('.quick-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      if (btn === playBtn && isBusy) {
+        vscode.postMessage({ type: 'stopTask' });
+        return;
+      }
+      if (btn.disabled) return;
       vscode.postMessage({
         type: 'quickAction',
         payload: { action: btn.dataset.action, profiles: [...checkedProfiles] }
@@ -762,6 +821,9 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
       presets = msg.presets;
       populateModoSelect();
       renderPresetList();
+    }
+    if (msg.type === 'busy') {
+      setBusy(!!msg.busy);
     }
   });
 

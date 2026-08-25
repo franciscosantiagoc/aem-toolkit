@@ -98,6 +98,22 @@ export function buildFrontendCommand(project: AemProjectInfo, command: string): 
 
 const TERMINAL_NAME = 'AEM Toolkit';
 
+// Referencia a la Task actualmente en ejecución (si hay alguna) para poder detenerla desde el
+// botón ▶/⏹ del panel — VS Code no expone un "listado global de tasks" cómodo, así que la
+// llevamos nosotros. Solo corre una a la vez (el panel deshabilita los demás botones mientras
+// hay una en curso), por eso alcanza con una única referencia en vez de una pila.
+let currentExecution: vscode.TaskExecution | undefined;
+
+/** true si hay una Task de AEM Toolkit corriendo en este momento. */
+export function isTaskRunning(): boolean {
+  return !!currentExecution;
+}
+
+/** Detiene la Task en curso (si hay alguna) — la llama el botón ⏹ del panel. */
+export function stopCurrentTask(): void {
+  currentExecution?.terminate();
+}
+
 /**
  * Corre un comando como una VS Code Task (no un simple 'sendText' a una terminal) para poder
  * esperar a que termine (necesario para encadenar pasos, ej. correr tests después del build, o
@@ -123,13 +139,20 @@ export function runAsTask(cwd: string, command: string, label: string): Promise<
     const disposable = vscode.tasks.onDidEndTaskProcess((e) => {
       if (e.execution.task === task) {
         disposable.dispose();
+        currentExecution = undefined;
         resolve(e.exitCode);
       }
     });
-    vscode.tasks.executeTask(task).then(undefined, () => {
-      disposable.dispose();
-      resolve(undefined);
-    });
+    vscode.tasks.executeTask(task).then(
+      (taskExecution) => {
+        currentExecution = taskExecution;
+      },
+      () => {
+        disposable.dispose();
+        currentExecution = undefined;
+        resolve(undefined);
+      }
+    );
   });
 }
 
