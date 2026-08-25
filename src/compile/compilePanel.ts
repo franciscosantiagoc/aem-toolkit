@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { AemProjectInfo, detectAemProjectsInWorkspace } from '../core/projectDetector';
 import { getConfig, saveCompilePreset, deleteCompilePreset, CompilePreset, BaseCompileMode } from '../config';
-import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget, stopCurrentTask } from './compileRunner';
+import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget, stopCurrentTask, wasLastRunCancelled } from './compileRunner';
 import { hasUncommittedChangesIn } from '../core/gitInfo';
 import { addJacocoProfile } from '../coverage/jacocoSetup';
 import { collectBackendCoverage } from '../coverage/jacocoParser';
@@ -60,6 +60,10 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
     const combinedExtra = [deployArgs, run.extraArgs].filter(Boolean).join(' ');
     const { cwd, command } = buildMavenCommand(project, config, { profiles, skipTests: run.skipBackendTests, extraArgs: combinedExtra });
     const exit = await runAsTask(cwd, command, 'AEM: Compilar (Completa)');
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Compilación completa detenida por el usuario.');
+      return;
+    }
     if (exit !== 0) {
       vscode.window.showErrorMessage(`La compilación completa terminó con errores (código ${exit}). Revisa la terminal.`);
       return;
@@ -67,6 +71,10 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
     if (project.hasFrontendModule && project.frontendTestScript && !run.skipFrontendTests) {
       const frontCmd = buildFrontendCommand(project, `npm run ${project.frontendTestScript}`);
       const frontExit = await runAsTask(frontCmd.cwd, frontCmd.command, 'AEM: Tests de Front');
+      if (wasLastRunCancelled()) {
+        vscode.window.showWarningMessage('⏹ Tests de front detenidos por el usuario (el build completo sí terminó).');
+        return;
+      }
       if (frontExit !== 0) {
         vscode.window.showWarningMessage(`El build completo terminó bien, pero los tests de front fallaron (código ${frontExit}).`);
         return;
@@ -79,6 +87,10 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
   if (run.baseMode === 'front') {
     const { cwd, command } = buildFrontendCommand(project, config.frontBuildCommand);
     const exit = await runAsTask(cwd, command, 'AEM: Compilar (Solo Front)');
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Build de front detenido por el usuario.');
+      return;
+    }
     if (exit !== 0) {
       vscode.window.showErrorMessage(`El build de front terminó con errores (código ${exit}).`);
       return;
@@ -86,6 +98,10 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
     if (project.frontendTestScript && !run.skipFrontendTests) {
       const testCmd = buildFrontendCommand(project, `npm run ${project.frontendTestScript}`);
       const testExit = await runAsTask(testCmd.cwd, testCmd.command, 'AEM: Tests de Front');
+      if (wasLastRunCancelled()) {
+        vscode.window.showWarningMessage('⏹ Tests de front detenidos por el usuario (el build sí terminó).');
+        return;
+      }
       if (testExit !== 0) {
         vscode.window.showWarningMessage(`El build de front terminó bien, pero los tests fallaron (código ${testExit}).`);
         return;
@@ -105,7 +121,9 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
       excludeFrontend: true
     });
     const exit = await runAsTask(cwd, command, 'AEM: Compilar (Solo Back)');
-    if (exit === 0) {
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Compilación del back detenida por el usuario.');
+    } else if (exit === 0) {
       vscode.window.showInformationMessage('✔ Back compilado correctamente.');
     } else {
       vscode.window.showErrorMessage(`El back terminó con errores (código ${exit}).`);
@@ -122,6 +140,10 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
     }
     const { cwd, command } = buildFrontendCommand(project, `npm run ${project.frontendCoverageScript}`);
     const exit = await runAsTask(cwd, command, 'AEM: Coverage Front');
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Tests de front (coverage) detenidos por el usuario.');
+      return;
+    }
     if (exit !== 0) {
       vscode.window.showErrorMessage(`Los tests de front fallaron (código ${exit}) — no se generó el coverage.`);
       return;
@@ -170,6 +192,10 @@ export async function executeResolvedRun(context: vscode.ExtensionContext, proje
   });
   const label = changed ? 'AEM: Coverage Back (build completo)' : 'AEM: Coverage Back (solo tests)';
   const exit = await runAsTask(cwd, command, label);
+  if (wasLastRunCancelled()) {
+    vscode.window.showWarningMessage('⏹ Tests de back (coverage) detenidos por el usuario.');
+    return;
+  }
   if (exit !== 0) {
     vscode.window.showErrorMessage(`Los tests de back fallaron (código ${exit}) — revisa el reporte antes de confiar en el coverage.`);
     return;
@@ -227,26 +253,49 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
     return runAsTask(cwd, command, label);
   };
 
+  // Todas las acciones rápidas terminan con el mismo patrón: correr un goal y avisar el resultado
+  // — distinguiendo una cancelación manual (⏹, código undefined) de un error real.
+  const reportGoalResult = (exit: number | undefined, cancelledMessage: string, successMessage: string, errorMessage: (exit: number | undefined) => string) => {
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage(`⏹ ${cancelledMessage}`);
+      return;
+    }
+    if (exit === 0) vscode.window.showInformationMessage(successMessage);
+    else vscode.window.showErrorMessage(errorMessage(exit));
+  };
+
   switch (payload.action) {
     case 'compileWithTests': {
       const exit = await runGoal('clean install', 'AEM: Compilar (perfiles marcados, con tests)', {
         skipTests: false,
         excludeFrontend: false
       });
-      if (exit === 0) vscode.window.showInformationMessage('✔ Compilado (con tests).');
-      else vscode.window.showErrorMessage(`La compilación terminó con errores (código ${exit}).`);
+      reportGoalResult(
+        exit,
+        'Compilación detenida por el usuario.',
+        '✔ Compilado (con tests).',
+        (e) => `La compilación terminó con errores (código ${e}).`
+      );
       return;
     }
     case 'downloadDependencies': {
       const exit = await runGoal('dependency:resolve', 'AEM: Descargar dependencias');
-      if (exit === 0) vscode.window.showInformationMessage('✔ Dependencias descargadas/resueltas.');
-      else vscode.window.showErrorMessage(`No se pudieron resolver todas las dependencias (código ${exit}).`);
+      reportGoalResult(
+        exit,
+        'Descarga de dependencias detenida por el usuario.',
+        '✔ Dependencias descargadas/resueltas.',
+        (e) => `No se pudieron resolver todas las dependencias (código ${e}).`
+      );
       return;
     }
     case 'generateSources': {
       const exit = await runGoal('generate-sources', 'AEM: Generar sources');
-      if (exit === 0) vscode.window.showInformationMessage('✔ Sources generados y carpetas actualizadas.');
-      else vscode.window.showErrorMessage(`Falló la generación de sources (código ${exit}).`);
+      reportGoalResult(
+        exit,
+        'Generación de sources detenida por el usuario.',
+        '✔ Sources generados y carpetas actualizadas.',
+        (e) => `Falló la generación de sources (código ${e}).`
+      );
       return;
     }
     case 'compileSkipTests': {
@@ -254,22 +303,35 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
         skipTests: true,
         excludeFrontend: false
       });
-      if (exit === 0) vscode.window.showInformationMessage('✔ Compilado (tests salteados en back y front).');
-      else vscode.window.showErrorMessage(`La compilación terminó con errores (código ${exit}).`);
+      reportGoalResult(
+        exit,
+        'Compilación detenida por el usuario.',
+        '✔ Compilado (tests salteados en back y front).',
+        (e) => `La compilación terminó con errores (código ${e}).`
+      );
       return;
     }
     case 'clean': {
       const exit = await runGoal('clean', 'AEM: Limpiar (clean)');
-      if (exit === 0) vscode.window.showInformationMessage('✔ Proyecto limpiado.');
-      else vscode.window.showErrorMessage(`El clean terminó con errores (código ${exit}).`);
+      reportGoalResult(
+        exit,
+        'Limpieza (clean) detenida por el usuario.',
+        '✔ Proyecto limpiado.',
+        (e) => `El clean terminó con errores (código ${e}).`
+      );
       return;
     }
     case 'dependencyTree': {
       await runGoal('dependency:tree', 'AEM: Árbol de dependencias');
+      if (wasLastRunCancelled()) vscode.window.showWarningMessage('⏹ Árbol de dependencias detenido por el usuario.');
       return;
     }
     case 'analyzeDependencies': {
       const exit = await runGoal('dependency:analyze', 'AEM: Analizar dependencias');
+      if (wasLastRunCancelled()) {
+        vscode.window.showWarningMessage('⏹ Análisis de dependencias detenido por el usuario.');
+        return;
+      }
       if (exit === 0) vscode.window.showInformationMessage('✔ Análisis de dependencias terminado — revisa el reporte en la terminal (usadas sin declarar / declaradas sin usar).');
       else vscode.window.showWarningMessage(`El análisis de dependencias terminó con código ${exit} — revisa la terminal.`);
       return;

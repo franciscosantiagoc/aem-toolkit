@@ -103,6 +103,8 @@ const TERMINAL_NAME = 'AEM Toolkit';
 // llevamos nosotros. Solo corre una a la vez (el panel deshabilita los demás botones mientras
 // hay una en curso), por eso alcanza con una única referencia en vez de una pila.
 let currentExecution: vscode.TaskExecution | undefined;
+let cancelRequested = false;
+let lastRunWasCancelled = false;
 
 /** true si hay una Task de AEM Toolkit corriendo en este momento. */
 export function isTaskRunning(): boolean {
@@ -111,7 +113,22 @@ export function isTaskRunning(): boolean {
 
 /** Detiene la Task en curso (si hay alguna) — la llama el botón ⏹ del panel. */
 export function stopCurrentTask(): void {
-  currentExecution?.terminate();
+  if (currentExecution) {
+    cancelRequested = true;
+    currentExecution.terminate();
+  }
+}
+
+/**
+ * true si la última llamada a runAsTask() que terminó fue detenida manualmente con
+ * stopCurrentTask() (en vez de terminar sola con un código de salida real, que en ese caso suele
+ * venir 'undefined'). Se consume (se resetea a false) al leerla, así que hay que llamarla
+ * justo después de cada runAsTask() y antes de lanzar el siguiente paso encadenado.
+ */
+export function wasLastRunCancelled(): boolean {
+  const value = lastRunWasCancelled;
+  lastRunWasCancelled = false;
+  return value;
 }
 
 /**
@@ -140,6 +157,8 @@ export function runAsTask(cwd: string, command: string, label: string): Promise<
       if (e.execution.task === task) {
         disposable.dispose();
         currentExecution = undefined;
+        lastRunWasCancelled = cancelRequested;
+        cancelRequested = false;
         resolve(e.exitCode);
       }
     });
@@ -150,6 +169,8 @@ export function runAsTask(cwd: string, command: string, label: string): Promise<
       () => {
         disposable.dispose();
         currentExecution = undefined;
+        lastRunWasCancelled = cancelRequested;
+        cancelRequested = false;
         resolve(undefined);
       }
     );
