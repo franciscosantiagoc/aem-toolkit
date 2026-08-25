@@ -20,6 +20,13 @@ const TREE: Entry[] = [
     ]
   },
   {
+    label: 'Sincronizar',
+    icon: 'cloud-upload',
+    children: [{ label: 'Configurar credenciales...', commandId: 'aemToolkit.configureSyncCredentials', icon: 'key' }]
+    // "Subir a Author"/"Subir a Publish" viven en el menú contextual de archivos/carpetas (clic
+    // derecho dentro de jcr_root) — necesitan un archivo/carpeta concreto elegido, no van acá.
+  },
+  {
     label: 'Proyecto',
     icon: 'info',
     children: [
@@ -27,9 +34,8 @@ const TREE: Entry[] = [
       { label: 'Actualizar detección', commandId: 'aemToolkit.refreshProjectInfo', icon: 'refresh' }
     ]
   }
-  // Próximos bloques: "Sincronizar" (subir sin compilar), "Crear" (componente, XF, template,
-  // content fragment, tag, modelo, servlet, diálogo, data-sly-template), "Editar" (renombrar,
-  // diálogos, templates, i18n, cache).
+  // Próximos bloques: "Crear" (componente, XF, template, content fragment, tag, modelo, servlet,
+  // diálogo, data-sly-template), "Editar" (renombrar, diálogos, templates, i18n, cache).
 ];
 
 class AemToolkitTreeItem extends vscode.TreeItem {

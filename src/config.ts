@@ -23,6 +23,11 @@ export interface ExtensionConfig {
   defaultLocales: string[];
   namespace: string;
   componentsUtilsPath: string;
+  syncAuthorHost: string;
+  syncAuthorPort: string;
+  syncPublishHost: string;
+  syncPublishPort: string;
+  syncUsername: string;
 }
 
 export function getConfig(scope?: vscode.Uri): ExtensionConfig {
@@ -35,7 +40,12 @@ export function getConfig(scope?: vscode.Uri): ExtensionConfig {
     maxDialogTabs: cfg.get<number>('maxDialogTabs', 10),
     defaultLocales: cfg.get<string[]>('defaultLocales', []),
     namespace: cfg.get<string>('namespace', ''),
-    componentsUtilsPath: cfg.get<string>('componentsUtilsPath', '')
+    componentsUtilsPath: cfg.get<string>('componentsUtilsPath', ''),
+    syncAuthorHost: cfg.get<string>('sync.authorHost', 'localhost'),
+    syncAuthorPort: cfg.get<string>('sync.authorPort', '4502'),
+    syncPublishHost: cfg.get<string>('sync.publishHost', 'localhost'),
+    syncPublishPort: cfg.get<string>('sync.publishPort', '4503'),
+    syncUsername: cfg.get<string>('sync.username', 'admin')
   };
 }
 

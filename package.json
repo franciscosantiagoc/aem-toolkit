@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -76,6 +76,24 @@
         "title": "AEM: Mostrar información del proyecto detectado",
         "category": "AEM Toolkit",
         "icon": "$(info)"
+      },
+      {
+        "command": "aemToolkit.syncToAuthor",
+        "title": "AEM: Subir a Author",
+        "category": "AEM Toolkit",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "aemToolkit.syncToPublish",
+        "title": "AEM: Subir a Publish",
+        "category": "AEM Toolkit",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "aemToolkit.configureSyncCredentials",
+        "title": "AEM: Configurar credenciales de sincronización...",
+        "category": "AEM Toolkit",
+        "icon": "$(key)"
       }
     ],
     "menus": {
@@ -84,6 +102,28 @@
           "command": "aemToolkit.compile",
           "when": "explorerResourceIsFolder && resourceFilename =~ /^(ui\\.frontend|core|ui\\.apps|ui\\.content|all)$/",
           "group": "navigation@1"
+        },
+        {
+          "command": "aemToolkit.syncToAuthor",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "aemToolkitSync@1"
+        },
+        {
+          "command": "aemToolkit.syncToPublish",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "aemToolkitSync@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "aemToolkit.syncToAuthor",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "aemToolkitSync@1"
+        },
+        {
+          "command": "aemToolkit.syncToPublish",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "aemToolkitSync@2"
         }
       ],
       "view/title": [
@@ -146,6 +186,31 @@
           "type": "string",
           "default": "",
           "description": "Ruta (relativa a ui.apps/src/main/content/jcr_root/apps/<namespace>/components) donde viven los data-sly-template compartidos. Vacío = 'utils'."
+        },
+        "aemToolkit.sync.authorHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Host de la instancia AEM Author usada por 'AEM: Subir a Author'."
+        },
+        "aemToolkit.sync.authorPort": {
+          "type": "string",
+          "default": "4502",
+          "description": "Puerto de la instancia AEM Author usada por 'AEM: Subir a Author'."
+        },
+        "aemToolkit.sync.publishHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Host de la instancia AEM Publish usada por 'AEM: Subir a Publish'."
+        },
+        "aemToolkit.sync.publishPort": {
+          "type": "string",
+          "default": "4503",
+          "description": "Puerto de la instancia AEM Publish usada por 'AEM: Subir a Publish'."
+        },
+        "aemToolkit.sync.username": {
+          "type": "string",
+          "default": "admin",
+          "description": "Usuario compartido para autenticar la sincronización contra Author y Publish. La contraseña NO se guarda aquí: se configura por separado con 'AEM: Configurar credenciales de sincronización...' y se almacena de forma segura en VS Code Secret Storage."
         }
       }
     }

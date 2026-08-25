@@ -21,7 +21,7 @@ Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-
 | # | Bloque | Complejidad | Estado |
 |---|--------|:---:|---|
 | 1 | Cimientos: detección de proyecto (multi-módulo, ¿tiene `ui.frontend`?) + vista en barra de actividad + **Compilar proyecto** (front/back/ambos, perfiles, skip tests) | Baja–Media | ✅ v1.0.0 (estable) |
-| 2 | **Subir cambios de front sin compilar** (HTML/clientlibs/XML directo al JCR) | Baja–Media | ⏳ pendiente |
+| 2 | **Subir cambios de front sin compilar** (HTML/clientlibs/XML directo al JCR) | Baja–Media | ✅ v1.1.0 |
 | 3 | Crear **tags** (formulario + instrucciones de uso) | Baja | ⏳ |
 | 4 | Crear **data-sly-template** en `components/utils` | Baja | ⏳ |
 | 5 | Crear **Content Fragment Model** (formulario de atributos + instrucciones de uso) | Media | ⏳ |
@@ -85,8 +85,16 @@ Todas usan los perfiles que estén marcados en ese momento en la sección "Perfi
 
 **Detener una compilación en curso**: mientras hay una Task de Maven/npm corriendo (lanzada desde ▶, ⚡, cualquier acción rápida, o el botón "▶ Compilar" del wizard de Modo), el ícono ▶ se transforma en un **recuadro rojo ⏹** — al pulsarlo, se llama a `TaskExecution.terminate()` sobre la Task en curso. Mientras tanto, el resto de los botones del panel quedan deshabilitados (no se pueden lanzar dos compilaciones en paralelo sobre el mismo reactor). Al terminar — bien, con error, o detenida manualmente — el ícono vuelve a ▶ y todo se re-habilita solo. Cuando se detiene manualmente, el mensaje final lo dice explícitamente ("⏹ ... detenida por el usuario.") en vez de mostrarlo como un error con código `undefined` (que es lo que reporta VS Code cuando una Task se termina a la fuerza en vez de salir sola).
 
-### 3.2 Subir cambios de front sin compilar (Bloque 2)
-Sincroniza HTML/clientlibs/XML directo al repositorio (vía `aemsync`/`vlt`/paquete filevault, detectando cuál está disponible en el proyecto) sin pasar por Maven ni webpack. Debe respetar la ruta JCR real (`ui.apps/src/main/content/jcr_root/...`).
+### 3.2 Subir cambios de front sin compilar (Bloque 2) — ✅ v1.1.0
+Sincroniza archivos directo al JCR sin pasar por Maven ni webpack, usando la **API POST de Sling** directamente contra Author o Publish (sin dependencias npm nuevas: `http` nativo de Node + un multipart hecho a mano) — se descartó generar un paquete FileVault real (`vlt`/`filevault-content-package-maven-plugin`) por la complejidad de armar un ZIP de paquete a mano y por no poder probarlo contra una instancia AEM real desde este entorno.
+
+- **Disparador**: clic derecho sobre un archivo o carpeta dentro de `ui.apps/.../jcr_root/...` (menú `explorer/context` y `editor/context`, visible solo cuando la ruta contiene `jcr_root`) → **"AEM: Subir a Author"** o **"AEM: Subir a Publish"**. Si es un archivo, sube solo ese archivo; si es una carpeta, recorre recursivamente todo su contenido y sube cada archivo encontrado.
+- **Ruta JCR real**: se calcula a partir de la ruta local recortando todo lo anterior a `jcr_root` y decodificando la convención "platform" de FileVault (`_cq_dialog` → `cq:dialog`, `_jcr_content` → `jcr:content`) en cada segmento.
+- **Archivos `.content.xml`**: se importan con `:operation=import`, `:contentType=xml`, `:replace=true` y `:replaceProperties=true` sobre el nodo que describen (su carpeta contenedora) — reemplaza el nodo y sus propiedades existentes.
+- **Cualquier otro archivo** (HTML, CSS, JS, imágenes...): se sube como `nt:file` con la técnica estándar de la Sling POST Servlet — campo de formulario `*` (toma el nombre del nodo del archivo subido) + `*@TypeHint=nt:file`, contra el nodo padre.
+- Requiere que el nodo padre ya exista en el servidor (pensado para actualizar algo ya instalado antes con una compilación completa, no para crear estructura nueva desde cero).
+- **Progreso y cancelación**: barra de progreso con notificación (`vscode.window.withProgress`, cancelable) mientras sincroniza varios archivos; un canal de salida "AEM Toolkit — Sync" registra cada archivo (✔/✘) para revisar errores puntuales sin perder el resto de la sincronización.
+- **Credenciales**: host/puerto de Author y Publish son configuración normal (`aemToolkit.sync.*`, con los estándares `4502`/`4503`/`admin` precargados); la(s) contraseña(s) se configuran aparte con **"AEM: Configurar credenciales de sincronización..."** (también disponible en el árbol, bajo "Sincronizar") y se guardan en VS Code Secret Storage, nunca en `settings.json`. Si nunca se configuró una contraseña, se usa `admin` (estándar de una instancia AEM local recién instalada).
 
 ### 3.3 Crear componente (Bloque 17)
 - Pregunta: ¿versionado o no? ¿con modelo Sling o sin modelo (solo HTL estático)? Si detecta React en `ui.frontend` (por `package.json`/`webpack.config`), pregunta si se quiere generar también el componente React y ajusta el modelo para exponer sus props (ver 3.8).
@@ -167,6 +175,9 @@ Si el proyecto trae configuración de dispatcher accesible (ver carpetas `*-disp
 - `aemToolkit.maxDialogTabs`: número máximo de pestañas al crear un diálogo (default `10`).
 - `aemToolkit.defaultLocales`: idiomas por defecto a ofrecer en el modal de i18n (autodetectados de `i18n/*` si no se define).
 - `aemToolkit.componentsUtilsPath` / `aemToolkit.i18nPath` / `aemToolkit.namespace`: overrides de rutas si la convención del proyecto no coincide con la detectada automáticamente.
+- `aemToolkit.sync.authorHost` / `aemToolkit.sync.authorPort`: host/puerto de la instancia Author usada por "AEM: Subir a Author" (default `localhost`/`4502`).
+- `aemToolkit.sync.publishHost` / `aemToolkit.sync.publishPort`: host/puerto de la instancia Publish usada por "AEM: Subir a Publish" (default `localhost`/`4503`).
+- `aemToolkit.sync.username`: usuario compartido para ambos destinos (default `admin`). La contraseña no vive acá — se configura con "AEM: Configurar credenciales de sincronización..." y se guarda en Secret Storage.
 
 ## 5. Características adicionales sugeridas (no pedidas explícitamente, para valorar)
 
