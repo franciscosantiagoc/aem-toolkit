@@ -20,7 +20,7 @@ Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-
 
 | # | Bloque | Complejidad | Estado |
 |---|--------|:---:|---|
-| 1 | Cimientos: detección de proyecto (multi-módulo, ¿tiene `ui.frontend`?) + vista en barra de actividad + **Compilar proyecto** (front/back/ambos, perfiles, skip tests) | Baja–Media | 🚧 en construcción |
+| 1 | Cimientos: detección de proyecto (multi-módulo, ¿tiene `ui.frontend`?) + vista en barra de actividad + **Compilar proyecto** (front/back/ambos, perfiles, skip tests) | Baja–Media | ✅ v1.0.0 (estable) |
 | 2 | **Subir cambios de front sin compilar** (HTML/clientlibs/XML directo al JCR) | Baja–Media | ⏳ pendiente |
 | 3 | Crear **tags** (formulario + instrucciones de uso) | Baja | ⏳ |
 | 4 | Crear **data-sly-template** en `components/utils` | Baja | ⏳ |
