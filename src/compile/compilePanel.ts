@@ -253,6 +253,16 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
     return runAsTask(cwd, command, label);
   };
 
+  // "Descargar dependencias"/"Generar sources"/"Analizar dependencias" excluyen ui.frontend del
+  // reactor (igual que "Solo Back") — en un proyecto recién clonado, si algún otro módulo depende
+  // del artefacto de ui.frontend (o de otro hermano, ej. "core") y ese hermano nunca se compiló ni
+  // se instaló en el repositorio Maven local, Maven no puede resolver esa dependencia y falla con
+  // "Could not resolve dependencies...". No es un bug de la extensión: es la limitación conocida de
+  // invocar un goal suelto (no parte del ciclo de vida) contra un reactor multi-módulo sin artefactos
+  // previos. Se avisa con una pista accionable en vez de solo mostrar el código de salida.
+  const FRESH_CHECKOUT_HINT =
+    ' Si este es un proyecto recién clonado, es normal: un módulo hermano (ej. "ui.frontend" o "core") probablemente todavía no está compilado ni instalado en tu repositorio Maven local. Corre "▶ Compilar" (modo "Completa") una vez primero — después esta acción funcionará normalmente.';
+
   // Todas las acciones rápidas terminan con el mismo patrón: correr un goal y avisar el resultado
   // — distinguiendo una cancelación manual (⏹, código undefined) de un error real.
   const reportGoalResult = (exit: number | undefined, cancelledMessage: string, successMessage: string, errorMessage: (exit: number | undefined) => string) => {
@@ -284,7 +294,7 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
         exit,
         'Descarga de dependencias detenida por el usuario.',
         '✔ Dependencias descargadas/resueltas.',
-        (e) => `No se pudieron resolver todas las dependencias (código ${e}).`
+        (e) => `No se pudieron resolver todas las dependencias (código ${e}).${FRESH_CHECKOUT_HINT}`
       );
       return;
     }
@@ -294,7 +304,7 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
         exit,
         'Generación de sources detenida por el usuario.',
         '✔ Sources generados y carpetas actualizadas.',
-        (e) => `Falló la generación de sources (código ${e}).`
+        (e) => `Falló la generación de sources (código ${e}).${FRESH_CHECKOUT_HINT}`
       );
       return;
     }
@@ -333,7 +343,7 @@ export async function executeQuickAction(project: AemProjectInfo, payload: Quick
         return;
       }
       if (exit === 0) vscode.window.showInformationMessage('✔ Análisis de dependencias terminado — revisa el reporte en la terminal (usadas sin declarar / declaradas sin usar).');
-      else vscode.window.showWarningMessage(`El análisis de dependencias terminó con código ${exit} — revisa la terminal.`);
+      else vscode.window.showWarningMessage(`El análisis de dependencias terminó con código ${exit} — revisa la terminal.${FRESH_CHECKOUT_HINT}`);
       return;
     }
   }
@@ -565,7 +575,7 @@ function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[]): str
       <button class="quick-btn" data-action="dependencyTree" title="Ver árbol de dependencias (mvn dependency:tree)">🌳</button>
       <button class="quick-btn" data-action="analyzeDependencies" title="Analizar dependencias — declaradas sin usar / usadas sin declarar (mvn dependency:analyze)">🔍</button>
     </div>
-    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo. Descargar, generar sources, limpiar, árbol y análisis excluyen ui.frontend del reactor (igual que "Solo Back"); ▶ Compilar y ⚡ Compilar sin tests corren el reactor completo (incluye ui.frontend), con y sin tests respectivamente.</div>
+    <div class="hint">Usan los perfiles marcados en "Perfiles Maven" de abajo. Descargar, generar sources, limpiar, árbol y análisis excluyen ui.frontend del reactor (igual que "Solo Back"); ▶ Compilar y ⚡ Compilar sin tests corren el reactor completo (incluye ui.frontend), con y sin tests respectivamente. En un proyecto recién clonado, corre ▶ o "Completa" una vez antes de usar 📥/🗂️/🌳/🔍 — si un módulo hermano (ej. ui.frontend) nunca se compiló, esas acciones fallarán al resolver dependencias.</div>
   </section>
 
   <section>
