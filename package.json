@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -189,8 +189,9 @@
         },
         "aemToolkit.javaHome": {
           "type": "string",
+          "scope": "resource",
           "default": "",
-          "description": "Ruta a la carpeta del JDK que debe usar Maven al compilar desde este panel (ej. 'C:\\\\Program Files\\\\Java\\\\jdk-22'), igual al que elegiste en IntelliJ para este proyecto. Configúralo si compilar desde la terminal integrada de VS Code falla con errores como 'UnsupportedClassVersionError' que no ocurren en IntelliJ — normalmente significa que la shell por defecto (bash/Git Bash, cmd) resuelve un JDK distinto al que usa tu IDE. Vacío (por defecto) = se usa el JDK que resuelva esa shell (JAVA_HOME/PATH del sistema), sin cambios."
+          "description": "Ruta a la carpeta del JDK que debe usar Maven al compilar desde este panel (ej. 'C:\\\\Program Files\\\\Java\\\\jdk-22'), igual al que elegiste en IntelliJ para este proyecto. Es una configuración de WORKSPACE (guárdala en la pestaña 'Espacio de trabajo' de Configuración, no en 'Usuario') — así solo aplica a este proyecto; en cualquier otro proyecto (u otro workspace) que no la configure, se sigue usando el JDK por defecto del sistema sin ningún cambio. Configúrala si compilar desde la terminal integrada de VS Code falla con errores como 'UnsupportedClassVersionError' que no ocurren en IntelliJ — normalmente significa que la shell por defecto (bash/Git Bash, cmd) resuelve un JDK distinto al que usa tu IDE. Vacío (por defecto) = sin cambios, se usa el JDK que resuelva esa shell (JAVA_HOME/PATH del sistema)."
         },
         "aemToolkit.sync.authorHost": {
           "type": "string",
