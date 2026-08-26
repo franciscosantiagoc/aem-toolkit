@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { parseDocView } from '../sync/docview';
 import { serializeDocView } from './docviewSerializer';
-import { fromDocView, toDocView, DialogTree, TOP_FIELD_TYPES } from './dialogModel';
+import { fromDocView, toDocView, DialogTree } from './dialogModel';
+import { FIELD_TYPES } from './fieldCatalog';
 import { getSyncTarget } from '../sync/credentials';
 import { syncUris } from '../sync/syncRunner';
 
@@ -13,15 +14,7 @@ const EMPTY_DIALOG_SKELETON = `<?xml version="1.0" encoding="UTF-8"?>
   jcr:title="Diálogo"
   sling:resourceType="cq/gui/components/authoring/dialog">
   <content jcr:primaryType="nt:unstructured" sling:resourceType="granite/ui/components/coral/foundation/container">
-    <items jcr:primaryType="nt:unstructured">
-      <tabs jcr:primaryType="nt:unstructured" sling:resourceType="granite/ui/components/coral/foundation/tabs">
-        <items jcr:primaryType="nt:unstructured">
-          <general jcr:primaryType="nt:unstructured" jcr:title="General" sling:resourceType="granite/ui/components/coral/foundation/container">
-            <items jcr:primaryType="nt:unstructured"/>
-          </general>
-        </items>
-      </tabs>
-    </items>
+    <items jcr:primaryType="nt:unstructured"/>
   </content>
 </jcr:root>
 `;
@@ -81,7 +74,12 @@ export async function openDialogEditor(context: vscode.ExtensionContext, uri?: v
   panel.webview.onDidReceiveMessage(async (msg: any) => {
     if (msg?.type !== 'save') return;
     try {
-      const rebuilt = toDocView({ rootProperties: msg.rootProperties, tabs: msg.tabs });
+      const rebuilt = toDocView({
+        rootProperties: msg.rootProperties,
+        hasTabs: !!msg.hasTabs,
+        tabs: msg.tabs || [],
+        items: msg.items || []
+      });
       const xml = serializeDocView(rebuilt);
       fs.writeFileSync(fsPath, xml, 'utf8');
       panel.webview.postMessage({ type: 'saved', ok: true });
@@ -107,7 +105,7 @@ export async function openDialogEditor(context: vscode.ExtensionContext, uri?: v
 
 function renderDialogEditorHtml(tree: DialogTree): string {
   const initialTreeJson = JSON.stringify(tree).replace(/</g, '\\u003c');
-  const fieldTypesJson = JSON.stringify(TOP_FIELD_TYPES).replace(/</g, '\\u003c');
+  const fieldTypesJson = JSON.stringify(FIELD_TYPES).replace(/</g, '\\u003c');
 
   return /* html */ `<!DOCTYPE html>
 <html lang="es">
@@ -118,7 +116,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   h2 { font-size: 15px; margin: 0 0 4px 0; }
   .hint { color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 14px; }
   label { display:block; font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
-  input[type=text], input[type=number], select, textarea {
+  input[type=text], input[type=number], input[type=password], select, textarea {
     width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border, transparent); padding: 5px 8px; border-radius: 3px; font-size: 13px; margin-bottom: 8px;
   }
@@ -131,7 +129,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
   button.icon { background: transparent; color: var(--vscode-foreground); padding: 2px 6px; font-size: 13px; }
   button.icon:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
-  .tab-strip { display:flex; gap:4px; border-bottom: 1px solid var(--vscode-editorWidget-border, #3c3c3c); margin-bottom: 14px; flex-wrap: wrap; }
+  .tab-strip { display:flex; gap:4px; border-bottom: 1px solid var(--vscode-editorWidget-border, #3c3c3c); margin-bottom: 14px; flex-wrap: wrap; min-height: 30px; align-items:center; }
   .tab-btn { background: transparent; color: var(--vscode-foreground); border: none; border-bottom: 2px solid transparent; padding: 6px 10px; cursor:pointer; font-size:13px; }
   .tab-btn.active { border-bottom-color: var(--vscode-focusBorder, #007acc); font-weight: 600; }
   .tab-btn .x { margin-left:6px; opacity:.6; }
@@ -151,6 +149,8 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   .add-row { display:flex; gap:6px; align-items:center; margin: 8px 0 14px 0; }
   .add-row select { width:auto; margin-bottom:0; }
   .add-row input { margin-bottom:0; }
+  .move-row { display:flex; gap:6px; align-items:center; margin: 0 0 10px 0; padding-left: 8px; }
+  .move-row select { width:auto; margin-bottom:0; }
   .option-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
   .option-row input[type=text] { margin-bottom:0; }
   .note { color: var(--vscode-descriptionForeground); font-size:12px; font-style: italic; }
@@ -164,8 +164,9 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   <h2>Editor de diálogo</h2>
   <div class="hint">
     Simplificación de esta versión: los layouts de columnas se aplanan a una sola columna al guardar, y solo hay edición
-    dedicada para 10 tipos de campo — otros tipos ya presentes en el diálogo se conservan (se pueden reordenar/eliminar) pero
-    sin editor propio todavía.
+    dedicada para el catálogo de tipos de esta versión — otros tipos ya presentes en el diálogo se conservan (se pueden
+    reordenar/eliminar) pero sin editor propio todavía. Las pestañas son opcionales: si el diálogo no las usa, los campos
+    van directo en la raíz hasta que agregues pestañas explícitamente.
   </div>
 
   <label>Título del diálogo</label>
@@ -208,6 +209,11 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     if (idx >= 0) item.properties[idx] = { name, type, multi: false, values: [value] };
     else item.properties.push({ name, type, multi: false, values: [value] });
   }
+  function setMultiProp(item, name, type, values) {
+    const idx = item.properties.findIndex((p) => p.name === name);
+    if (idx >= 0) item.properties[idx] = { name, type, multi: true, values };
+    else item.properties.push({ name, type, multi: true, values });
+  }
   function removeProp(item, name) {
     item.properties = item.properties.filter((p) => p.name !== name);
   }
@@ -227,6 +233,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   function createNewItem(typeId, label, siblingNames) {
     const def = findTypeDef(typeId);
     const nodeName = sanitizeNodeName(label, siblingNames, (typeId === 'tab' || typeId === 'fieldset') ? 'grupo' : 'campo');
+
     if (typeId === 'tab' || typeId === 'fieldset') {
       return {
         uiId: newUiId(), kind: typeId, nodeName,
@@ -234,19 +241,47 @@ function renderDialogEditorHtml(tree: DialogTree): string {
         children: [], rawNode: { name: nodeName, properties: [], children: [] }
       };
     }
+
+    if (typeId === 'heading') {
+      const properties = [
+        { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+        { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
+        { name: 'text', type: 'String', multi: false, values: [label || 'Encabezado'] }
+      ];
+      return { uiId: newUiId(), kind: typeId, nodeName, properties, children: [], rawNode: { name: nodeName, properties: properties.slice(), children: [] } };
+    }
+
+    if (typeId === 'hidden') {
+      const properties = [
+        { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+        { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
+        { name: 'name', type: 'String', multi: false, values: ['./' + nodeName] }
+      ];
+      return { uiId: newUiId(), kind: typeId, nodeName, properties, children: [], rawNode: { name: nodeName, properties: properties.slice(), children: [] } };
+    }
+
     const properties = [
       { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
       { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
       { name: 'fieldLabel', type: 'String', multi: false, values: [label || def.label] },
       { name: 'name', type: 'String', multi: false, values: ['./' + nodeName] }
     ];
-    if (typeId === 'pathfield') properties.push({ name: 'rootPath', type: 'String', multi: false, values: ['/content/dam'] });
-    if (typeId === 'checkbox') {
+    if (typeId === 'pathfield' || typeId === 'pathbrowser') properties.push({ name: 'rootPath', type: 'String', multi: false, values: ['/content/dam'] });
+    if (typeId === 'tags') properties.push({ name: 'rootPath', type: 'String', multi: false, values: ['/content/cq:tags'] });
+    if (typeId === 'checkbox' || typeId === 'switch') {
       properties.push({ name: 'value', type: 'Boolean', multi: false, values: ['true'] });
       properties.push({ name: 'uncheckedValue', type: 'Boolean', multi: false, values: ['false'] });
     }
+    if (typeId === 'datepicker') {
+      properties.push({ name: 'type', type: 'String', multi: false, values: ['date'] });
+      properties.push({ name: 'displayedFormat', type: 'String', multi: false, values: ['YYYY-MM-DD'] });
+    }
+    if (typeId === 'fileupload') {
+      properties.push({ name: 'mimeTypes', type: 'String', multi: true, values: ['image/gif', 'image/jpeg', 'image/png'] });
+      properties.push({ name: 'useHTML5', type: 'Boolean', multi: false, values: ['true'] });
+    }
     const rawNode = { name: nodeName, properties: properties.slice(), children: [] };
-    if (typeId === 'select') {
+    if (typeId === 'select' || typeId === 'radiogroup') {
       rawNode.children.push({ name: 'items', properties: [{ name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] }],
         children: [{ name: 'item0', properties: [
           { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
@@ -325,19 +360,46 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     return undefined;
   }
   function findItem(uiId) {
-    for (const tab of state.tabs) {
-      if (tab.uiId === uiId) return tab;
-      const stack = [...tab.children];
-      while (stack.length) {
-        const it = stack.pop();
+    const searchList = (list) => {
+      for (const it of list) {
         if (it.uiId === uiId) return it;
-        if (it.children) stack.push(...it.children);
+        if (it.children && it.children.length) {
+          const found = searchList(it.children);
+          if (found) return found;
+        }
       }
+      return undefined;
+    };
+    if (state.hasTabs) {
+      for (const tab of state.tabs) {
+        if (tab.uiId === uiId) return tab;
+        const found = searchList(tab.children);
+        if (found) return found;
+      }
+      return undefined;
     }
-    return undefined;
+    return searchList(state.items);
+  }
+
+  // --- A qué pestaña (índice top-level) pertenece un ítem, para la acción "mover a otra pestaña" ---
+  function locateItemTabIndex(uiId) {
+    for (let ti = 0; ti < state.tabs.length; ti++) {
+      if (findContainingList(uiId, state.tabs[ti].children)) return ti;
+    }
+    return -1;
+  }
+  function moveItemToTab(item, targetIdx) {
+    const owningIdx = locateItemTabIndex(item.uiId);
+    if (owningIdx === -1 || owningIdx === targetIdx) return;
+    const found = findContainingList(item.uiId, state.tabs[owningIdx].children);
+    if (!found) return;
+    found.list.splice(found.index, 1);
+    state.tabs[targetIdx].children.push(item);
+    render();
   }
 
   let expandedEditors = new Set();
+  let moveSelectorsOpen = new Set();
 
   function el(tag, attrs, ...children) {
     const e = document.createElement(tag);
@@ -363,7 +425,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     if (item.kind === 'tab' || item.kind === 'fieldset') {
       box.appendChild(el('label', {}, 'Título'));
       const input = el('input', { type: 'text', value: getProp(item, 'jcr:title') || '' });
-      input.addEventListener('input', () => { setProp(item, 'jcr:title', 'String', input.value); renderActiveTab(); });
+      input.addEventListener('input', () => { setProp(item, 'jcr:title', 'String', input.value); renderContent(); });
       box.appendChild(input);
       return box;
     }
@@ -371,6 +433,27 @@ function renderDialogEditorHtml(tree: DialogTree): string {
       box.appendChild(el('div', { class: 'note' }, 'Este tipo de campo (', (item.rawNode.properties.find(p=>p.name==='sling:resourceType')||{values:['?']}).values[0], ') todavía no tiene edición dedicada — se conserva tal cual al guardar.'));
       return box;
     }
+    if (item.kind === 'heading') {
+      box.appendChild(el('label', {}, 'Texto del encabezado'));
+      const t = el('input', { type: 'text', value: getProp(item, 'text') || '' });
+      t.addEventListener('input', () => { setProp(item, 'text', 'String', t.value); render(); });
+      box.appendChild(t);
+      return box;
+    }
+    if (item.kind === 'hidden') {
+      box.appendChild(el('label', {}, 'Nombre de propiedad (name)'));
+      const nameInput = el('input', { type: 'text', value: getProp(item, 'name') || '' });
+      nameInput.addEventListener('input', () => setProp(item, 'name', 'String', nameInput.value));
+      box.appendChild(nameInput);
+      box.appendChild(el('label', {}, 'Valor'));
+      const valInput = el('input', { type: 'text', value: getProp(item, 'value') || '' });
+      valInput.addEventListener('input', () => setProp(item, 'value', 'String', valInput.value));
+      box.appendChild(valInput);
+      return box;
+    }
+
+    const def = findTypeDef(item.kind);
+    const editorKind = def ? def.propertyEditor : 'none';
 
     const row1 = el('div', { class: 'prop-row' });
     const labelDiv = el('div', {}, el('label', {}, 'Etiqueta'), (() => {
@@ -391,18 +474,48 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     descInput.addEventListener('input', () => setProp(item, 'fieldDescription', 'String', descInput.value));
     box.appendChild(descInput);
 
-    if (item.kind === 'textfield' || item.kind === 'textarea' || item.kind === 'richtext' || item.kind === 'numberfield') {
+    if (editorKind === 'textvalue') {
       box.appendChild(el('label', {}, 'Valor por defecto'));
-      const v = el('input', { type: item.kind === 'numberfield' ? 'number' : 'text', value: getProp(item, 'value') || '' });
+      const inputType = item.kind === 'numberfield' ? 'number' : (item.kind === 'password' ? 'password' : 'text');
+      const v = el('input', { type: inputType, value: getProp(item, 'value') || '' });
       v.addEventListener('input', () => setProp(item, 'value', 'String', v.value));
       box.appendChild(v);
     }
 
-    if (item.kind === 'pathfield') {
-      box.appendChild(el('label', {}, 'Ruta raíz (rootPath)'));
-      const v = el('input', { type: 'text', value: getProp(item, 'rootPath') || '/content/dam' });
+    if (editorKind === 'pathfield') {
+      box.appendChild(el('label', {}, item.kind === 'tags' ? 'Ruta raíz de tags (rootPath)' : 'Ruta raíz (rootPath)'));
+      const v = el('input', { type: 'text', value: getProp(item, 'rootPath') || (item.kind === 'tags' ? '/content/cq:tags' : '/content/dam') });
       v.addEventListener('input', () => setProp(item, 'rootPath', 'String', v.value));
       box.appendChild(v);
+    }
+
+    if (editorKind === 'datepicker') {
+      box.appendChild(el('label', {}, 'Tipo'));
+      const typeSel = el('select', {});
+      ['date', 'datetime', 'time'].forEach((opt) => {
+        const o = el('option', { value: opt }, opt);
+        if ((getProp(item, 'type') || 'date') === opt) o.setAttribute('selected', 'selected');
+        typeSel.appendChild(o);
+      });
+      typeSel.addEventListener('change', () => setProp(item, 'type', 'String', typeSel.value));
+      box.appendChild(typeSel);
+
+      box.appendChild(el('label', {}, 'Formato mostrado (displayedFormat)'));
+      const fmt = el('input', { type: 'text', value: getProp(item, 'displayedFormat') || 'YYYY-MM-DD' });
+      fmt.addEventListener('input', () => setProp(item, 'displayedFormat', 'String', fmt.value));
+      box.appendChild(fmt);
+    }
+
+    if (editorKind === 'fileupload') {
+      box.appendChild(el('label', {}, 'Tipos MIME permitidos (separados por coma)'));
+      const mimeProp = item.properties.find((p) => p.name === 'mimeTypes');
+      const mimeVal = mimeProp ? mimeProp.values.join(',') : 'image/gif,image/jpeg,image/png';
+      const mime = el('input', { type: 'text', value: mimeVal });
+      mime.addEventListener('input', () => {
+        const values = mime.value.split(',').map((s) => s.trim()).filter(Boolean);
+        setMultiProp(item, 'mimeTypes', 'String', values);
+      });
+      box.appendChild(mime);
     }
 
     const reqRow = el('div', { class: 'checkbox-row' });
@@ -414,7 +527,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     reqRow.appendChild(reqCheck); reqRow.appendChild(el('span', {}, 'Obligatorio'));
     box.appendChild(reqRow);
 
-    if (item.kind === 'select') {
+    if (editorKind === 'options') {
       box.appendChild(el('label', {}, 'Opciones'));
       const optsWrap = el('div', {});
       function renderOptions() {
@@ -446,7 +559,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
       box.appendChild(addOpt);
     }
 
-    if (item.kind === 'multifield') {
+    if (editorKind === 'multifield-inner') {
       const inner = getMultifieldInner(item);
       box.appendChild(el('label', {}, 'Tipo de campo repetido'));
       const innerSelect = el('select', {});
@@ -475,7 +588,10 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   function renderAddRow(targetChildren, siblingNamesFn) {
     const row = el('div', { class: 'add-row' });
     const select = el('select', {});
-    FIELD_TYPES.forEach((t) => select.appendChild(el('option', { value: t.id }, t.label)));
+    // 'tab' se excluye a propósito: una pestaña nueva solo se crea desde el botón dedicado de la
+    // tira de pestañas (o "Agregar pestañas" cuando todavía no hay ninguna) — nunca anidada dentro
+    // de un agrupador ni de otra pestaña.
+    FIELD_TYPES.filter((t) => t.id !== 'tab').forEach((t) => select.appendChild(el('option', { value: t.id }, t.label)));
     const labelInput = el('input', { type: 'text', placeholder: 'Etiqueta (opcional)' });
     const addBtn = el('button', {}, '+ Agregar');
     addBtn.addEventListener('click', () => {
@@ -500,7 +616,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
 
       const badge = el('span', { class: 'badge' }, typeLabel(item.kind));
       const label = el('span', { class: 'label' },
-        (getProp(item, 'fieldLabel') || getProp(item, 'jcr:title') || item.nodeName),
+        (getProp(item, 'fieldLabel') || getProp(item, 'jcr:title') || getProp(item, 'text') || item.nodeName),
         el('span', { class: 'sub' }, item.nodeName)
       );
 
@@ -516,8 +632,39 @@ function renderDialogEditorHtml(tree: DialogTree): string {
         render();
       });
 
-      row.appendChild(up); row.appendChild(down); row.appendChild(badge); row.appendChild(label); row.appendChild(editBtn); row.appendChild(delBtn);
+      row.appendChild(up); row.appendChild(down); row.appendChild(badge); row.appendChild(label); row.appendChild(editBtn);
+
+      // "Mover a otra pestaña": solo tiene sentido si el diálogo usa pestañas y hay más de una.
+      if (state.hasTabs && state.tabs.length > 1 && item.kind !== 'tab') {
+        const moveBtn = el('button', { class: 'icon', title: 'Mover a otra pestaña' }, '↪');
+        moveBtn.addEventListener('click', () => {
+          const owningIdx = locateItemTabIndex(item.uiId);
+          const others = state.tabs.map((t, i) => i).filter((i) => i !== owningIdx);
+          if (others.length <= 1) {
+            if (others.length === 1) moveItemToTab(item, others[0]);
+          } else {
+            if (moveSelectorsOpen.has(item.uiId)) moveSelectorsOpen.delete(item.uiId); else moveSelectorsOpen.add(item.uiId);
+            render();
+          }
+        });
+        row.appendChild(moveBtn);
+      }
+
+      row.appendChild(delBtn);
       container.appendChild(row);
+
+      if (state.hasTabs && state.tabs.length > 2 && moveSelectorsOpen.has(item.uiId)) {
+        const owningIdx = locateItemTabIndex(item.uiId);
+        const others = state.tabs.map((t, i) => i).filter((i) => i !== owningIdx);
+        const moveRow = el('div', { class: 'move-row' });
+        const sel = el('select', {});
+        others.forEach((i) => sel.appendChild(el('option', { value: String(i) }, getProp(state.tabs[i], 'jcr:title') || state.tabs[i].nodeName)));
+        const goBtn = el('button', { class: 'secondary' }, 'Mover aquí');
+        goBtn.addEventListener('click', () => { moveSelectorsOpen.delete(item.uiId); moveItemToTab(item, Number(sel.value)); });
+        moveRow.appendChild(el('span', { class: 'note' }, 'Mover a: '));
+        moveRow.appendChild(sel); moveRow.appendChild(goBtn);
+        container.appendChild(moveRow);
+      }
 
       if (expandedEditors.has(item.uiId)) {
         container.appendChild(renderPropertyEditor(item));
@@ -536,6 +683,23 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   function renderTabStrip() {
     const strip = document.getElementById('tabStrip');
     strip.innerHTML = '';
+
+    if (!state.hasTabs) {
+      const addTabsBtn = el('button', { class: 'tab-btn' }, '+ Agregar pestañas');
+      addTabsBtn.title = 'Convierte los campos actuales en la primera pestaña y habilita agregar más.';
+      addTabsBtn.addEventListener('click', () => {
+        const firstTab = createNewItem('tab', 'General', []);
+        firstTab.children = state.items.slice();
+        state.items = [];
+        state.tabs = [firstTab];
+        state.hasTabs = true;
+        activeTabIndex = 0;
+        render();
+      });
+      strip.appendChild(addTabsBtn);
+      return;
+    }
+
     state.tabs.forEach((tab, i) => {
       const btn = el('button', { class: 'tab-btn' + (i === activeTabIndex ? ' active' : '') },
         (getProp(tab, 'jcr:title') || tab.nodeName),
@@ -544,6 +708,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
           x.addEventListener('click', (e) => {
             e.stopPropagation();
             state.tabs.splice(i, 1);
+            if (state.tabs.length === 0) { state.hasTabs = false; state.items = []; }
             if (activeTabIndex >= state.tabs.length) activeTabIndex = Math.max(0, state.tabs.length - 1);
             render();
           });
@@ -553,6 +718,8 @@ function renderDialogEditorHtml(tree: DialogTree): string {
       btn.addEventListener('click', () => { activeTabIndex = i; render(); });
       strip.appendChild(btn);
     });
+    // "+ Pestaña" siempre agrega una pestaña HERMANA de las existentes (nunca anidada) — es la
+    // única otra vía, junto con "+ Agregar pestañas" de arriba, para crear pestañas.
     const addTabBtn = el('button', { class: 'tab-btn' }, '+ Pestaña');
     addTabBtn.addEventListener('click', () => {
       const item = createNewItem('tab', 'Nueva pestaña', state.tabs.map((t) => t.nodeName));
@@ -563,18 +730,23 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     strip.appendChild(addTabBtn);
   }
 
-  function renderActiveTab() {
+  function renderContent() {
     const content = document.getElementById('tabContent');
     content.innerHTML = '';
-    const tab = state.tabs[activeTabIndex];
-    if (!tab) { content.appendChild(el('div', { class: 'note' }, 'No hay pestañas — agrega una arriba.')); return; }
-    renderItemList(content, tab.children);
-    content.appendChild(renderAddRow(tab.children, () => tab.children.map((c) => c.nodeName)));
+    if (state.hasTabs) {
+      const tab = state.tabs[activeTabIndex];
+      if (!tab) { content.appendChild(el('div', { class: 'note' }, 'No hay pestañas — agrega una arriba.')); return; }
+      renderItemList(content, tab.children);
+      content.appendChild(renderAddRow(tab.children, () => tab.children.map((c) => c.nodeName)));
+    } else {
+      renderItemList(content, state.items);
+      content.appendChild(renderAddRow(state.items, () => state.items.map((c) => c.nodeName)));
+    }
   }
 
   function render() {
     renderTabStrip();
-    renderActiveTab();
+    renderContent();
   }
 
   document.getElementById('dialogTitle').value = getRootTitle();
@@ -582,7 +754,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
 
   document.getElementById('saveBtn').addEventListener('click', () => {
     document.getElementById('statusText').textContent = 'Guardando...';
-    vscode.postMessage({ type: 'save', rootProperties: state.rootProperties, tabs: state.tabs });
+    vscode.postMessage({ type: 'save', rootProperties: state.rootProperties, hasTabs: state.hasTabs, tabs: state.tabs, items: state.items });
   });
 
   window.addEventListener('message', (event) => {

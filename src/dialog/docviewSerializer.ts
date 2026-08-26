@@ -4,12 +4,17 @@ import { DocViewNode, DocViewProperty } from '../sync/docview';
  * Inverso de `docview.ts#parseDocView`: convierte un árbol `DocViewNode` de vuelta a texto XML
  * FileVault Document View, listo para escribirse tal cual en un `.content.xml`.
  *
- * Simplificaciones deliberadas frente al formato exacto que produce FileVault/`vlt`:
- *  - Cada nodo (etiqueta + atributos) se emite en una sola línea, en vez del ocasional
- *    "un atributo por línea" que usa FileVault para nodos con muchos atributos — funcionalmente
- *    idéntico (a XML no le importa), y más fácil de diffear en git.
- *  - Los namespaces `jcr`, `sling`, `cq`, `nt` se declaran siempre en la raíz, se usen o no — es
- *    inofensivo y evita tener que rastrear cuáles se usan de verdad en todo el árbol.
+ * Formato de salida (v1.5.0, a pedido explícito del usuario):
+ *  - La abertura de la etiqueta y su primer atributo van en la primera línea: `<nombre attr1="...">`
+ *    o, si hay más atributos, `<nombre attr1="..."` (sin `>` todavía).
+ *  - Si el nodo tiene más de un atributo, los siguientes se listan uno por línea, cada uno
+ *    indentado un nivel más a la derecha que la abertura, y el `>` de cierre va pegado al final del
+ *    ÚLTIMO atributo (no en una línea aparte).
+ *  - Si el nodo tiene 0 o 1 atributos, el `>` va en esa misma primera línea.
+ *  - En todos los casos la etiqueta de cierre `</nombre>` va en su propia línea siguiente — nunca se
+ *    usa autocierre `/>`, aunque el nodo no tenga hijos (XML-equivalente; a un parser SAX/DOM le da
+ *    igual, así todo el árbol queda formateado de manera uniforme, no solo los campos agregados
+ *    desde el editor visual).
  */
 
 const STANDARD_NAMESPACES: [string, string][] = [
@@ -40,24 +45,38 @@ function serializePropertyValue(prop: DocViewProperty): string {
   return `${typePrefix}${escapeDocViewScalar(prop.values[0] ?? '', false)}`;
 }
 
-function serializeAttributes(properties: DocViewProperty[], extraNamespaces: [string, string][] = []): string {
+function attributeStrings(properties: DocViewProperty[], extraNamespaces: [string, string][]): string[] {
   const parts: string[] = [];
   for (const [prefix, uri] of extraNamespaces) parts.push(`xmlns:${prefix}="${uri}"`);
   for (const prop of properties) {
     parts.push(`${prop.name}="${escapeXmlAttr(serializePropertyValue(prop))}"`);
   }
-  return parts.join(' ');
+  return parts;
 }
 
 function serializeNode(node: DocViewNode, depth: number, extraNamespaces: [string, string][] = []): string {
   const indent = '  '.repeat(depth);
-  const attrs = serializeAttributes(node.properties, extraNamespaces);
-  const openTag = attrs ? `<${node.name} ${attrs}` : `<${node.name}`;
+  const attrIndent = '  '.repeat(depth + 1);
+  const attrs = attributeStrings(node.properties, extraNamespaces);
+
+  let openLines: string[];
+  if (attrs.length === 0) {
+    openLines = [`${indent}<${node.name}>`];
+  } else if (attrs.length === 1) {
+    openLines = [`${indent}<${node.name} ${attrs[0]}>`];
+  } else {
+    const first = `${indent}<${node.name} ${attrs[0]}`;
+    const middle = attrs.slice(1, -1).map((a) => `${attrIndent}${a}`);
+    const last = `${attrIndent}${attrs[attrs.length - 1]}>`;
+    openLines = [first, ...middle, last];
+  }
+
+  const closeLine = `${indent}</${node.name}>`;
   if (node.children.length === 0) {
-    return `${indent}${openTag}/>`;
+    return `${openLines.join('\n')}\n${closeLine}`;
   }
   const childrenXml = node.children.map((c) => serializeNode(c, depth + 1)).join('\n');
-  return `${indent}${openTag}>\n${childrenXml}\n${indent}</${node.name}>`;
+  return `${openLines.join('\n')}\n${childrenXml}\n${closeLine}`;
 }
 
 /** Serializa un árbol completo (la raíz que representa el nodo `jcr:root`) a texto XML listo para

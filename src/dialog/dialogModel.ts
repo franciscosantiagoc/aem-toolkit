@@ -1,16 +1,23 @@
 import { DocViewNode, DocViewProperty } from '../sync/docview';
-import { FieldTypeDef, TOP_FIELD_TYPES, findFieldTypeById, findFieldTypeByResourceType, isFieldsetResourceType } from './fieldCatalog';
+import { FieldTypeDef, findFieldTypeById, findFieldTypeByResourceType, isFieldsetResourceType } from './fieldCatalog';
 
 /**
- * Modelo simplificado que usa el editor visual de diálogos (v1.4.0), construido a partir del árbol
- * genérico de `docview.ts` (el mismo que ya usa la sincronización). Simplificaciones deliberadas de
- * esta versión, documentadas también en FEATURES.md:
- *  - Un diálogo siempre se representa como una lista de PESTAÑAS. Si el original no usaba pestañas
- *    (campos directo bajo `content`), se envuelven en una pestaña implícita "General" al cargar.
+ * Modelo simplificado que usa el editor visual de diálogos, construido a partir del árbol genérico
+ * de `docview.ts` (el mismo que ya usa la sincronización). Simplificaciones deliberadas de esta
+ * versión, documentadas también en FEATURES.md:
+ *  - Un diálogo puede representarse SIN pestañas (`hasTabs: false`, campos planos en `items`) o CON
+ *    pestañas (`hasTabs: true`, lista de pestañas en `tabs`) — a diferencia de v1.4.0, ya NO se
+ *    envuelve forzosamente en una pestaña "General" sintética si el original no usaba pestañas. El
+ *    editor solo pasa a modo pestañas cuando el usuario lo pide explícitamente ("Agregar pestañas"),
+ *    y en ese momento los campos planos existentes se mueven automáticamente a la primera pestaña.
+ *  - No se permite anidar una segunda estructura de pestañas dentro de una ya existente (ver
+ *    dialogPanel.ts: "tab" se excluye del selector genérico de "Agregar..." en cualquier nivel — la
+ *    única forma de crear pestañas adicionales es el botón dedicado de la tira de pestañas, que
+ *    siempre agrega hermanas de las ya existentes, nunca anidadas).
  *  - Los layouts de columnas (`fixedcolumns`/`column`) se APLANAN a una sola lista por pestaña o
  *    agrupador al cargar, y NUNCA se reintroducen al guardar (siempre queda en una sola columna).
- *  - Solo los 10 tipos de `fieldCatalog.ts` tienen edición dedicada. Cualquier otro tipo de campo
- *    ya presente en el diálogo se conserva como ítem "avanzado" (`kind: 'unknown'`) — se puede
+ *  - Solo los tipos de `fieldCatalog.ts` tienen edición dedicada. Cualquier otro tipo de campo ya
+ *    presente en el diálogo se conserva como ítem "avanzado" (`kind: 'unknown'`) — se puede
  *    reordenar y eliminar, pero no editar en detalle todavía, y su nodo XML original se preserva
  *    tal cual al guardar (nunca se destruye por no tener editor propio).
  */
@@ -44,16 +51,21 @@ export interface DialogItem {
   /** Solo relevante para 'tab' y 'fieldset'. */
   children: DialogItem[];
   /** Nodo original completo (con sus hijos crudos tal cual) — fuente de verdad para lo que no se
-   * edita con un formulario dedicado: opciones de 'select', campo interno de 'multifield', y
-   * cualquier contenido de un ítem 'unknown'. Para ítems nuevos, es un nodo sintético con los
-   * valores por defecto del tipo. */
+   * edita con un formulario dedicado: opciones de 'select'/'radiogroup', campo interno de
+   * 'multifield', y cualquier contenido de un ítem 'unknown'. Para ítems nuevos, es un nodo
+   * sintético con los valores por defecto del tipo. */
   rawNode: DocViewNode;
 }
 
 export interface DialogTree {
   /** Propiedades del propio nodo cq:Dialog (jcr:primaryType, jcr:title, sling:resourceType...). */
   rootProperties: DocViewProperty[];
+  /** true si el diálogo usa una estructura de pestañas (nodo `.../tabs` bajo `content`). */
+  hasTabs: boolean;
+  /** Relevante solo cuando hasTabs=true. */
   tabs: DialogItem[];
+  /** Relevante solo cuando hasTabs=false: ítems planos directamente bajo `content`. */
+  items: DialogItem[];
 }
 
 const TABS_RESOURCE_TYPE = 'granite/ui/components/coral/foundation/tabs';
@@ -136,32 +148,21 @@ function nodeToTab(node: DocViewNode): DialogItem {
 }
 
 /** Interpreta el árbol crudo (la raíz del `_cq_dialog/.content.xml`, es decir el propio `cq:Dialog`)
- * en el modelo simplificado que usa el editor visual. */
+ * en el modelo simplificado que usa el editor visual. Si el diálogo no tiene una estructura de
+ * pestañas, se representa con `hasTabs: false` y sus campos planos en `items` — ya NO se envuelve
+ * en una pestaña "General" sintética (cambio de v1.5.0). */
 export function fromDocView(root: DocViewNode): DialogTree {
   const contentNode = root.children.find((c) => c.name === 'content') ?? root;
   const tabsNode = findNodeByResourceTypeSuffix(contentNode, '/tabs');
 
-  let tabs: DialogItem[];
   if (tabsNode) {
     const tabItemsNode = itemsChild(tabsNode);
-    tabs = (tabItemsNode?.children ?? []).map(nodeToTab);
-  } else {
-    const flat = collectFlatItems(contentNode);
-    tabs =
-      flat.length > 0
-        ? [
-            {
-              uiId: newUiId(),
-              kind: 'tab',
-              nodeName: 'general',
-              properties: [{ name: 'jcr:title', type: 'String', multi: false, values: ['General'] }],
-              children: flat.map(classifyItem),
-              rawNode: contentNode
-            }
-          ]
-        : [];
+    const tabs = (tabItemsNode?.children ?? []).map(nodeToTab);
+    return { rootProperties: root.properties, hasTabs: true, tabs, items: [] };
   }
-  return { rootProperties: root.properties, tabs };
+
+  const flat = collectFlatItems(contentNode);
+  return { rootProperties: root.properties, hasTabs: false, tabs: [], items: flat.map(classifyItem) };
 }
 
 function wrapItems(children: DocViewNode[]): DocViewNode {
@@ -191,29 +192,36 @@ function dialogItemToNode(item: DialogItem): DocViewNode {
     return containerNode(item.nodeName, fieldset.resourceType, item.properties, item.children);
   }
   // Campo hoja (conocido o 'unknown'): las propiedades editables son la fuente de verdad para los
-  // atributos, pero los hijos crudos (opciones de select, campo interno de multifield, cualquier
-  // cosa de un 'unknown') se preservan de rawNode sin tocar.
+  // atributos, pero los hijos crudos (opciones de select/radiogroup, campo interno de multifield,
+  // cualquier cosa de un 'unknown') se preservan de rawNode sin tocar.
   return { name: item.nodeName, properties: item.properties, children: item.rawNode.children };
 }
 
 /** Reconstruye el árbol completo `docview` (listo para `serializeDocView`) a partir del modelo
- * simplificado — inversa de `fromDocView`. Siempre reconstruye tabs/fieldsets desde cero (por eso
- * el layout de columnas nunca se reintroduce), y siempre agrega un único `tabs` bajo un único
- * `content`, aunque el original no usara pestañas (se documenta como simplificación de v1.4.0). */
+ * simplificado — inversa de `fromDocView`. Si `hasTabs` es false, `content` contiene los ítems
+ * planos directamente (sin ningún nodo `tabs` de por medio) — un diálogo editado sin pestañas se
+ * guarda sin pestañas. Si es true, reconstruye tabs desde cero (por eso el layout de columnas
+ * nunca se reintroduce). */
 export function toDocView(tree: DialogTree): DocViewNode {
-  const tabsNode = containerNode('tabs', TABS_RESOURCE_TYPE, [], []);
-  // containerNode ya generó "children: [wrapItems([])]" — lo reemplazamos por las tabs reales.
-  tabsNode.children = [wrapItems(tree.tabs.map(dialogItemToNode))];
+  let contentChildren: DocViewNode[];
+  if (tree.hasTabs) {
+    const tabsNode = containerNode('tabs', TABS_RESOURCE_TYPE, [], []);
+    tabsNode.children = [wrapItems(tree.tabs.map(dialogItemToNode))];
+    contentChildren = [tabsNode];
+  } else {
+    contentChildren = tree.items.map(dialogItemToNode);
+  }
 
   const content = containerNode('content', CONTAINER_RESOURCE_TYPE, [], []);
-  content.children = [wrapItems([tabsNode])];
+  content.children = [wrapItems(contentChildren)];
 
   return { name: 'jcr:root', properties: tree.rootProperties, children: [content] };
 }
 
 // ---------------------------------------------------------------------------------------------
-// Accesores para los datos anidados de 'select' (opciones) y 'multifield' (campo interno) — leen
-// y escriben directamente sobre item.rawNode.children, que es lo que dialogItemToNode reutiliza.
+// Accesores para los datos anidados de 'select'/'radiogroup' (opciones) y 'multifield' (campo
+// interno) — leen y escriben directamente sobre item.rawNode.children, que es lo que
+// dialogItemToNode reutiliza.
 // ---------------------------------------------------------------------------------------------
 
 export function getSelectOptions(item: DialogItem): SelectOptionItem[] {
@@ -301,9 +309,23 @@ export function sanitizeNodeName(label: string, siblingNames: string[], fallback
 
 const DEFAULT_PROPS_BY_TYPE: Record<string, DocViewProperty[]> = {
   pathfield: [{ name: 'rootPath', type: 'String', multi: false, values: ['/content/dam'] }],
+  pathbrowser: [{ name: 'rootPath', type: 'String', multi: false, values: ['/content/dam'] }],
+  tags: [{ name: 'rootPath', type: 'String', multi: false, values: ['/content/cq:tags'] }],
   checkbox: [
     { name: 'value', type: 'Boolean', multi: false, values: ['true'] },
     { name: 'uncheckedValue', type: 'Boolean', multi: false, values: ['false'] }
+  ],
+  switch: [
+    { name: 'value', type: 'Boolean', multi: false, values: ['true'] },
+    { name: 'uncheckedValue', type: 'Boolean', multi: false, values: ['false'] }
+  ],
+  datepicker: [
+    { name: 'type', type: 'String', multi: false, values: ['date'] },
+    { name: 'displayedFormat', type: 'String', multi: false, values: ['YYYY-MM-DD'] }
+  ],
+  fileupload: [
+    { name: 'mimeTypes', type: 'String', multi: true, values: ['image/gif', 'image/jpeg', 'image/png'] },
+    { name: 'useHTML5', type: 'Boolean', multi: false, values: ['true'] }
   ]
 };
 
@@ -313,28 +335,41 @@ export function createNewItem(typeId: string, label: string, siblingNodeNames: s
   const typeDef = findFieldTypeById(typeId);
   const nodeName = sanitizeNodeName(label, siblingNodeNames, typeId === 'tab' || typeId === 'fieldset' ? 'grupo' : 'campo');
 
-  if (typeId === 'tab') {
+  if (typeId === 'tab' || typeId === 'fieldset') {
     return {
       uiId: newUiId(),
-      kind: 'tab',
+      kind: typeId,
       nodeName,
-      properties: [{ name: 'jcr:title', type: 'String', multi: false, values: [label || 'Nueva pestaña'] }],
-      children: [],
-      rawNode: { name: nodeName, properties: [], children: [] }
-    };
-  }
-  if (typeId === 'fieldset') {
-    return {
-      uiId: newUiId(),
-      kind: 'fieldset',
-      nodeName,
-      properties: [{ name: 'jcr:title', type: 'String', multi: false, values: [label || 'Nuevo agrupador'] }],
+      properties: [{ name: 'jcr:title', type: 'String', multi: false, values: [label || (typeId === 'tab' ? 'Nueva pestaña' : 'Nuevo agrupador')] }],
       children: [],
       rawNode: { name: nodeName, properties: [], children: [] }
     };
   }
 
   const def: FieldTypeDef = typeDef ?? findFieldTypeById('textfield')!;
+
+  // "heading" no se enlaza a ninguna propiedad JCR: no lleva fieldLabel/name, solo un texto estático.
+  if (def.id === 'heading') {
+    const properties: DocViewProperty[] = [
+      { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+      { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
+      { name: 'text', type: 'String', multi: false, values: [label || 'Encabezado'] }
+    ];
+    const rawNode: DocViewNode = { name: nodeName, properties, children: [] };
+    return { uiId: newUiId(), kind: def.id, nodeName, properties, children: [], rawNode };
+  }
+
+  // "hidden" solo necesita nombre técnico + valor, sin fieldLabel (no se muestra al autor).
+  if (def.id === 'hidden') {
+    const properties: DocViewProperty[] = [
+      { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+      { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
+      { name: 'name', type: 'String', multi: false, values: [`./${nodeName}`] }
+    ];
+    const rawNode: DocViewNode = { name: nodeName, properties, children: [] };
+    return { uiId: newUiId(), kind: def.id, nodeName, properties, children: [], rawNode };
+  }
+
   const properties: DocViewProperty[] = [
     { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
     { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
@@ -343,7 +378,7 @@ export function createNewItem(typeId: string, label: string, siblingNodeNames: s
     ...(DEFAULT_PROPS_BY_TYPE[def.id] ?? [])
   ];
   const rawNode: DocViewNode = { name: nodeName, properties, children: [] };
-  if (def.id === 'select') {
+  if (def.id === 'select' || def.id === 'radiogroup') {
     setSelectOptionsOnRaw(rawNode, [{ text: 'Opción 1', value: 'opcion1', selected: false }]);
   }
   if (def.id === 'multifield') {
@@ -377,4 +412,3 @@ function setSelectOptionsOnRaw(rawNode: DocViewNode, options: SelectOptionItem[]
   });
 }
 
-export { TOP_FIELD_TYPES };
