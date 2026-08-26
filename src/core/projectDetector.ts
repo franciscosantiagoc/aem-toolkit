@@ -213,6 +213,25 @@ export function detectAemProject(rootPath: string): AemProjectInfo | undefined {
  * contenga en su primer nivel) un proyecto AEM reconocible. Soporta el caso común de abrir la
  * carpeta padre que contiene varios proyectos AEM hermanos (como 'D:\GeneralProjects\AEM').
  */
+/**
+ * Sube desde `fsPath` (un archivo o carpeta cualquiera dentro del proyecto, ej. la carpeta
+ * `components` sobre la que se hizo clic derecho) buscando el primer ancestro que sea la raíz de un
+ * proyecto AEM reconocible (`detectAemProject`). Se usa para comandos que se disparan sobre una
+ * carpeta profunda del árbol (ej. "Crear componente") en vez de sobre la raíz del workspace.
+ */
+export function findAemProjectForPath(fsPath: string): AemProjectInfo | undefined {
+  let dir = fs.statSync(fsPath).isDirectory() ? fsPath : path.dirname(fsPath);
+  // Límite de seguridad: no subir más de 20 niveles (evita un bucle infinito en rutas raras).
+  for (let i = 0; i < 20; i++) {
+    const info = detectAemProject(dir);
+    if (info) return info;
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined; // llegamos a la raíz del filesystem
+    dir = parent;
+  }
+  return undefined;
+}
+
 export function detectAemProjectsInWorkspace(): AemProjectInfo[] {
   const folders = vscode.workspace.workspaceFolders ?? [];
   const found: AemProjectInfo[] = [];

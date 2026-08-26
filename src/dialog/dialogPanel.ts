@@ -8,16 +8,22 @@ import { FIELD_TYPES } from './fieldCatalog';
 import { getSyncTarget } from '../sync/credentials';
 import { syncUris } from '../sync/syncRunner';
 
-const EMPTY_DIALOG_SKELETON = `<?xml version="1.0" encoding="UTF-8"?>
+/** Esqueleto de un diálogo vacío (sin campos), listo para abrirse en el editor visual. Se reusa
+ * también desde `component/componentGenerator.ts` al crear el `_cq_dialog` de un componente nuevo. */
+export function buildEmptyDialogXml(title = 'Diálogo'): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <jcr:root xmlns:jcr="http://www.jcp.org/jcr/1.0" xmlns:sling="http://sling.apache.org/jcr/sling/1.0" xmlns:cq="http://www.day.com/jcr/cq/1.0" xmlns:nt="http://www.jcp.org/jcr/nt/1.0"
   jcr:primaryType="cq:Dialog"
-  jcr:title="Diálogo"
+  jcr:title="${title}"
   sling:resourceType="cq/gui/components/authoring/dialog">
   <content jcr:primaryType="nt:unstructured" sling:resourceType="granite/ui/components/coral/foundation/container">
     <items jcr:primaryType="nt:unstructured"/>
   </content>
 </jcr:root>
 `;
+}
+
+const EMPTY_DIALOG_SKELETON = buildEmptyDialogXml();
 
 /** Resuelve, a partir de lo que el usuario seleccionó en el Explorador, la ruta al
  * `_cq_dialog/.content.xml` que hay que editar. Si seleccionó la carpeta `_cq_dialog`, se asume el

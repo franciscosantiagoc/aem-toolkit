@@ -7,6 +7,7 @@ import { getSyncTarget, configureSyncCredentials } from './sync/credentials';
 import { openDialogEditor } from './dialog/dialogPanel';
 import { showDialogQuickAddMenu } from './dialog/dialogQuickAdd';
 import { formatXmlFiles } from './format/formatXmlCommand';
+import { createComponentWizard } from './component/componentCreate';
 
 function showProjectInfo(): void {
   const projects = detectAemProjectsInWorkspace();
@@ -68,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('aemToolkit.editDialog', (uri?: vscode.Uri) => openDialogEditor(context, uri)),
     vscode.commands.registerCommand('aemToolkit.dialogQuickAdd', (uri?: vscode.Uri) => showDialogQuickAddMenu(context, uri)),
     vscode.commands.registerCommand('aemToolkit.formatXml', (uri?: vscode.Uri, uris?: vscode.Uri[]) => formatXmlFiles(resolveSelectedUris(uri, uris))),
+    vscode.commands.registerCommand('aemToolkit.createComponent', (uri?: vscode.Uri) => createComponentWizard(context, uri)),
     vscode.window.registerTreeDataProvider('aemToolkitView', treeProvider)
   );
 }

@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -112,6 +112,12 @@
         "title": "AEM: Formatear XML",
         "category": "AEM Toolkit",
         "icon": "$(list-tree)"
+      },
+      {
+        "command": "aemToolkit.createComponent",
+        "title": "AEM: Crear componente...",
+        "category": "AEM Toolkit",
+        "icon": "$(new-folder)"
       }
     ],
     "submenus": [
@@ -124,6 +130,11 @@
         "id": "aemToolkit.editorMenu",
         "label": "AEM Toolkit",
         "icon": "media/activitybar-icon.svg"
+      },
+      {
+        "id": "aemToolkit.createMenu",
+        "label": "Crear nuevo...",
+        "icon": "$(add)"
       }
     ],
     "menus": {
@@ -158,6 +169,17 @@
           "command": "aemToolkit.formatXml",
           "when": "resourceExtname == '.xml' && resourcePath =~ /jcr_root/",
           "group": "4_format@1"
+        },
+        {
+          "submenu": "aemToolkit.createMenu",
+          "when": "explorerResourceIsFolder && resourcePath =~ /jcr_root.*\\/components(\\/|$)/",
+          "group": "5_create@1"
+        }
+      ],
+      "aemToolkit.createMenu": [
+        {
+          "command": "aemToolkit.createComponent",
+          "group": "1_create@1"
         }
       ],
       "editor/context": [
