@@ -17,12 +17,29 @@ import { DocViewNode, DocViewProperty } from '../sync/docview';
  *    desde el editor visual).
  */
 
-const STANDARD_NAMESPACES: [string, string][] = [
+export const STANDARD_NAMESPACES: [string, string][] = [
   ['jcr', 'http://www.jcp.org/jcr/1.0'],
   ['sling', 'http://sling.apache.org/jcr/sling/1.0'],
   ['cq', 'http://www.day.com/jcr/cq/1.0'],
   ['nt', 'http://www.jcp.org/jcr/nt/1.0']
 ];
+
+/** Combina las 4 namespaces estándar (siempre presentes, por si el árbol usa esos prefijos) con
+ * cualquier namespace adicional detectada en el archivo original (ej. `granite`, `dam`, `wcmio`) —
+ * usado por el comando "Formatear XML" para no perder namespaces propias de un archivo existente al
+ * reserializarlo. Las estándar van primero y en orden fijo; las detectadas que ya estén en las
+ * estándar se ignoran (evita duplicar el prefijo). */
+export function mergeNamespaces(detected: [string, string][]): [string, string][] {
+  const result: [string, string][] = [...STANDARD_NAMESPACES];
+  const known = new Set(result.map(([prefix]) => prefix));
+  for (const [prefix, uri] of detected) {
+    if (!known.has(prefix)) {
+      result.push([prefix, uri]);
+      known.add(prefix);
+    }
+  }
+  return result;
+}
 
 function escapeXmlAttr(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -80,8 +97,10 @@ function serializeNode(node: DocViewNode, depth: number, extraNamespaces: [strin
 }
 
 /** Serializa un árbol completo (la raíz que representa el nodo `jcr:root`) a texto XML listo para
- * escribirse en un `.content.xml`, con la declaración XML y las 4 namespaces estándar. */
-export function serializeDocView(root: DocViewNode): string {
-  const body = serializeNode(root, 0, STANDARD_NAMESPACES);
+ * escribirse en un `.content.xml`. Por defecto declara las 4 namespaces estándar; pasa `namespaces`
+ * (ej. el resultado de `mergeNamespaces(extractRootNamespaces(original))`) para preservar además
+ * cualquier namespace adicional que ya tuviera el archivo original. */
+export function serializeDocView(root: DocViewNode, namespaces: [string, string][] = STANDARD_NAMESPACES): string {
+  const body = serializeNode(root, 0, namespaces);
   return `<?xml version="1.0" encoding="UTF-8"?>\n${body}\n`;
 }

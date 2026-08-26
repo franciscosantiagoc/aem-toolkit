@@ -108,6 +108,28 @@ function buildNode(nodeObj: Record<string, unknown>, name: string): DocViewNode 
 }
 
 /**
+ * Extrae las declaraciones de namespace (`xmlns` / `xmlns:prefijo`) del elemento raíz de un
+ * `.content.xml` — a diferencia de `parseDocView`, que las descarta a propósito porque no son
+ * propiedades JCR (ver `readAttributes`). Se usa para poder RE-declarar exactamente las mismas
+ * namespaces al reformatear/reserializar un archivo existente (ej. `aemToolkit.formatXml`), en vez
+ * de asumir siempre el mismo set fijo de 4 — así un archivo que además declare namespaces propias
+ * (ej. `granite`, `dam`, `wcmio`) no las pierde al pasar por el formateador.
+ */
+export function extractRootNamespaces(xml: string): [string, string][] {
+  const withoutDecl = xml.replace(/^\uFEFF/, '').replace(/<\?xml[^>]*\?>/, '');
+  const openTagMatch = /<([a-zA-Z_][\w.:-]*)([^>]*)>/.exec(withoutDecl);
+  if (!openTagMatch) return [];
+  const attrsText = openTagMatch[2];
+  const namespaces: [string, string][] = [];
+  const nsRegex = /xmlns:([\w.-]+)="([^"]*)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = nsRegex.exec(attrsText))) {
+    namespaces.push([m[1], m[2]]);
+  }
+  return namespaces;
+}
+
+/**
  * Interpreta el contenido de un `.content.xml` (FileVault Document View) y devuelve el nodo raíz
  * — que representa las propiedades e hijos del elemento `jcr:root` (es decir, del nodo padre que
  * contiene al propio archivo, según la convención ya usada en `syncRunner.ts`).

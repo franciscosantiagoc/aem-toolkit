@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseDocView } from '../sync/docview';
-import { serializeDocView } from './docviewSerializer';
+import { parseDocView, extractRootNamespaces } from '../sync/docview';
+import { serializeDocView, mergeNamespaces } from './docviewSerializer';
 import { fromDocView, toDocView, DialogTree } from './dialogModel';
 import { FIELD_TYPES } from './fieldCatalog';
 import { getSyncTarget } from '../sync/credentials';
@@ -63,6 +63,9 @@ export async function openDialogEditor(context: vscode.ExtensionContext, uri?: v
     vscode.window.showErrorMessage(`No se pudo interpretar este diálogo: ${detail}`);
     return;
   }
+  // Namespaces del archivo original (jcr/sling/cq/nt siempre + cualquier otra que ya declarara, ej.
+  // "granite") — se reusan al guardar para no perder namespaces propias al reserializar el árbol.
+  const namespaces = mergeNamespaces(extractRootNamespaces(rawXml));
 
   const panel = vscode.window.createWebviewPanel('aemToolkitDialogEditor', `Diálogo: ${path.basename(path.dirname(fsPath))}`, vscode.ViewColumn.Active, {
     enableScripts: true,
@@ -80,7 +83,7 @@ export async function openDialogEditor(context: vscode.ExtensionContext, uri?: v
         tabs: msg.tabs || [],
         items: msg.items || []
       });
-      const xml = serializeDocView(rebuilt);
+      const xml = serializeDocView(rebuilt, namespaces);
       fs.writeFileSync(fsPath, xml, 'utf8');
       panel.webview.postMessage({ type: 'saved', ok: true });
 
