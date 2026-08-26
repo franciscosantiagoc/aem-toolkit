@@ -75,6 +75,12 @@ export async function openDialogEditor(context: vscode.ExtensionContext, uri?: v
   panel.webview.html = renderDialogEditorHtml(tree);
 
   panel.webview.onDidReceiveMessage(async (msg: any) => {
+    if (msg?.type === 'copyToClipboard') {
+      if (typeof msg.text === 'string' && msg.text) {
+        await vscode.env.clipboard.writeText(msg.text);
+      }
+      return;
+    }
     if (msg?.type !== 'save') return;
     try {
       const rebuilt = toDocView({
@@ -163,6 +169,13 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   .status.success { color: var(--vscode-testing-iconPassed, #3fb950); font-weight: 600; }
   .checkbox-row { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
   .checkbox-row input { width:auto; margin:0; }
+  .copy-usage-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin: 2px 0 12px 0; }
+  .copy-usage-feedback { font-size:11px; color: var(--vscode-testing-iconPassed, #3fb950); opacity:0; transition: opacity .2s; }
+  .copy-usage-feedback.show { opacity:1; }
+  .copy-usage-preview {
+    font-family: var(--vscode-editor-font-family, monospace); font-size:11px; color: var(--vscode-descriptionForeground);
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,.15)); padding:2px 6px; border-radius:3px;
+  }
 </style>
 </head>
 <body>
@@ -440,6 +453,71 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     return def ? def.label : 'Avanzado (' + kind + ')';
   }
 
+  // --- "Copiar cómo usarlo" (nuevo): arma la expresión HTL típica para leer esta propiedad
+  // (properties.nombre, entre llaves de HTL) más un comentario con el tipo de dato que se espera,
+  // para pegar directo en un .html del componente. ---
+  function stripLeadingPath(name) {
+    return name.indexOf('./') === 0 ? name.slice(2) : name;
+  }
+  function isDotSafeName(name) {
+    return /^[A-Za-z_][A-Za-z0-9_:]*$/.test(name);
+  }
+  function typeForKind(kind) {
+    if (kind === 'numberfield') return 'Number';
+    if (kind === 'checkbox' || kind === 'switch') return 'Boolean';
+    if (kind === 'datepicker') return 'Calendar';
+    if (kind === 'tags') return 'String[]';
+    return 'String';
+  }
+  function usageNoteForKind(kind) {
+    if (kind === 'checkbox' || kind === 'switch') return 'true si está marcado/activado, false si no';
+    if (kind === 'datepicker') return "usa @ format='dd/MM/yyyy' para mostrarlo formateado";
+    if (kind === 'tags') return 'array de IDs de tags — recorre con data-sly-list';
+    if (kind === 'pathfield' || kind === 'pathbrowser') return 'ruta (ej. a un asset o página)';
+    if (kind === 'fileupload') return 'ruta al asset subido';
+    if (kind === 'numberfield') return "en HTL llega como texto salvo que definas @ context='number'";
+    if (kind === 'select' || kind === 'radiogroup') return 'valor de la opción seleccionada';
+    return '';
+  }
+  function buildUsageSnippet(rawName, typeLabelStr, note) {
+    const clean = stripLeadingPath(rawName);
+    const expr = isDotSafeName(clean) ? ("\${properties." + clean + "}") : ("\${properties['" + clean + "']}");
+    const comment = note ? (typeLabelStr + ' — ' + note) : typeLabelStr;
+    return { expr: expr, text: expr + ' <!--/* ' + comment + ' */-->' };
+  }
+  function getHtlUsageInfo(item) {
+    if (item.kind === 'tab' || item.kind === 'fieldset' || item.kind === 'heading') return null;
+    if (item.kind === 'multifield') {
+      const inner = getMultifieldInner(item);
+      if (!inner.propertyName) return null;
+      return buildUsageSnippet(inner.propertyName, typeForKind(inner.kind) + '[]', 'un valor por fila — recorre con data-sly-list');
+    }
+    if (item.kind === 'unknown') {
+      const nameProp = item.rawNode.properties.find((p) => p.name === 'name');
+      if (!nameProp || !nameProp.values || !nameProp.values[0]) return null;
+      return buildUsageSnippet(nameProp.values[0], 'tipo sin determinar', 'revisa el sling:resourceType en el XML');
+    }
+    const name = getProp(item, 'name');
+    if (!name) return null;
+    return buildUsageSnippet(name, typeForKind(item.kind), usageNoteForKind(item.kind));
+  }
+  function renderCopyUsageRow(item) {
+    const info = getHtlUsageInfo(item);
+    if (!info) return null;
+    const row = el('div', { class: 'copy-usage-row' });
+    const feedback = el('span', { class: 'copy-usage-feedback' }, '✔ Copiado');
+    const btn = el('button', { class: 'secondary' }, '📋 Copiar cómo usarlo');
+    btn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'copyToClipboard', text: info.text });
+      feedback.classList.add('show');
+      setTimeout(() => feedback.classList.remove('show'), 1600);
+    });
+    row.appendChild(btn);
+    row.appendChild(feedback);
+    row.appendChild(el('code', { class: 'copy-usage-preview' }, info.text));
+    return row;
+  }
+
   function renderPropertyEditor(item) {
     const box = el('div', { class: 'prop-editor' });
     if (item.kind === 'tab' || item.kind === 'fieldset') {
@@ -451,6 +529,8 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     }
     if (item.kind === 'unknown') {
       box.appendChild(el('div', { class: 'note' }, 'Este tipo de campo (', (item.rawNode.properties.find(p=>p.name==='sling:resourceType')||{values:['?']}).values[0], ') todavía no tiene edición dedicada — se conserva tal cual al guardar.'));
+      const copyRow = renderCopyUsageRow(item);
+      if (copyRow) box.appendChild(copyRow);
       return box;
     }
     if (item.kind === 'heading') {
@@ -463,12 +543,20 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     if (item.kind === 'hidden') {
       box.appendChild(el('label', {}, 'Nombre de propiedad (name)'));
       const nameInput = el('input', { type: 'text', value: getProp(item, 'name') || '' });
-      nameInput.addEventListener('input', () => setProp(item, 'name', 'String', nameInput.value));
+      const hiddenCopyWrap = el('div', {});
+      function refreshHiddenCopyRow() {
+        hiddenCopyWrap.innerHTML = '';
+        const r = renderCopyUsageRow(item);
+        if (r) hiddenCopyWrap.appendChild(r);
+      }
+      nameInput.addEventListener('input', () => { setProp(item, 'name', 'String', nameInput.value); refreshHiddenCopyRow(); });
       box.appendChild(nameInput);
       box.appendChild(el('label', {}, 'Valor'));
       const valInput = el('input', { type: 'text', value: getProp(item, 'value') || '' });
       valInput.addEventListener('input', () => setProp(item, 'value', 'String', valInput.value));
       box.appendChild(valInput);
+      refreshHiddenCopyRow();
+      box.appendChild(hiddenCopyWrap);
       return box;
     }
 
@@ -484,15 +572,23 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     row1.appendChild(labelDiv);
     // 'multifield' no lleva 'name' propio (ver createNewItem) — su "nombre de propiedad" real es el
     // del campo interno repetido, que ya se edita más abajo en el bloque "multifield-inner".
+    const copyRowWrap = el('div', {});
+    function refreshCopyRow() {
+      copyRowWrap.innerHTML = '';
+      const r = renderCopyUsageRow(item);
+      if (r) copyRowWrap.appendChild(r);
+    }
     if (item.kind !== 'multifield') {
       const nameDiv = el('div', {}, el('label', {}, 'Nombre de propiedad (name)'), (() => {
         const i = el('input', { type: 'text', value: getProp(item, 'name') || '' });
-        i.addEventListener('input', () => setProp(item, 'name', 'String', i.value));
+        i.addEventListener('input', () => { setProp(item, 'name', 'String', i.value); refreshCopyRow(); });
         return i;
       })());
       row1.appendChild(nameDiv);
     }
     box.appendChild(row1);
+    refreshCopyRow();
+    box.appendChild(copyRowWrap);
 
     box.appendChild(el('label', {}, 'Descripción'));
     const descInput = el('input', { type: 'text', value: getProp(item, 'fieldDescription') || '' });
@@ -593,7 +689,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
         if (t.id === inner.kind) o.setAttribute('selected', 'selected');
         innerSelect.appendChild(o);
       });
-      innerSelect.addEventListener('change', () => { inner.kind = innerSelect.value; setMultifieldInner(item, inner); });
+      innerSelect.addEventListener('change', () => { inner.kind = innerSelect.value; setMultifieldInner(item, inner); refreshCopyRow(); });
       box.appendChild(innerSelect);
 
       box.appendChild(el('label', {}, 'Etiqueta del campo repetido'));
@@ -603,7 +699,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
 
       box.appendChild(el('label', {}, 'Nombre de propiedad del campo repetido'));
       const innerName = el('input', { type: 'text', value: inner.propertyName });
-      innerName.addEventListener('input', () => { inner.propertyName = innerName.value; setMultifieldInner(item, inner); });
+      innerName.addEventListener('input', () => { inner.propertyName = innerName.value; setMultifieldInner(item, inner); refreshCopyRow(); });
       box.appendChild(innerName);
     }
 
