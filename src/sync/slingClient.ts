@@ -143,9 +143,15 @@ export function uploadFile(target: SyncTarget, jcrParentPath: string, fileName: 
 }
 
 /**
- * Importa un `.content.xml` (FileVault Document View XML) directamente sobre el nodo que
- * describe — `:operation=import` con `:contentType=xml`, `:replace`/`:replaceProperties=true` para
- * que reemplace el nodo y sus propiedades existentes en vez de solo agregar las nuevas.
+ * NOTA HISTÓRICA (hasta v1.2.0 se usaba esta función para subir `.content.xml`): el
+ * `:contentType=xml` del Import Operation del Sling POST Servlet NO entiende el formato "Document
+ * View" de FileVault (el que usan los `.content.xml` reales, con `jcr:root`/`jcr:primaryType` como
+ * atributos) — espera un formato distinto y más verboso heredado del bundle `jcr.contentloader`
+ * (`<node><name>.../<name></node>`). Por eso las subidas de diálogos con esta función parecían
+ * "funcionar" (HTTP 200) pero no aplicaban de verdad los cambios. Reemplazada por
+ * `createOrUpdateNode`/`deleteNode` + el recorrido de árbol en `contentXmlSync.ts`, que reconstruye
+ * la subida como POSTs normales de Sling (que sí entienden `jcr:primaryType` como una propiedad
+ * más). Se deja sin usar por si algún día se necesita para otro `:contentType`.
  */
 export function importContentXml(target: SyncTarget, jcrNodePath: string, xmlContent: Buffer): Promise<SyncResult> {
   return postMultipart(target, jcrNodePath, [
@@ -155,4 +161,49 @@ export function importContentXml(target: SyncTarget, jcrNodePath: string, xmlCon
     { name: ':replaceProperties', value: 'true' },
     { name: ':contentFile', filename: '.content.xml', contentType: 'application/xml', value: xmlContent }
   ]);
+}
+
+/** Una propiedad JCR ya lista para mandarse como campos de formulario de Sling (ver `docview.ts`). */
+export interface SlingProperty {
+  name: string;
+  type: string;
+  multi: boolean;
+  values: string[];
+}
+
+function propertyToFormFields(prop: SlingProperty): MultipartField[] {
+  const fields: MultipartField[] = [{ name: `${prop.name}@TypeHint`, value: prop.multi ? `${prop.type}[]` : prop.type }];
+  if (prop.multi && prop.values.length === 0) {
+    // Una propiedad multivalor vacía necesita al menos un campo presente para que Sling la
+    // reconozca como "existe pero está vacía" en vez de simplemente no enviarla.
+    fields.push({ name: prop.name, value: '' });
+  } else {
+    for (const v of prop.values) fields.push({ name: prop.name, value: v });
+  }
+  return fields;
+}
+
+/**
+ * Crea (si no existe) o actualiza (si ya existe) un nodo JCR con sus propiedades propias, usando
+ * el comportamiento normal — no especial — del Sling POST Servlet: cada campo de formulario es
+ * una propiedad, y `jcr:primaryType` como campo normal fija el tipo del nodo nuevo. A diferencia de
+ * `importContentXml`, esto SÍ entiende correctamente cada propiedad porque no depende de que Sling
+ * interprete el XML — el XML ya se interpretó de antemano en `docview.ts`.
+ */
+export function createOrUpdateNode(target: SyncTarget, jcrPath: string, properties: SlingProperty[]): Promise<SyncResult> {
+  const fields = properties.length > 0 ? properties.flatMap(propertyToFormFields) : [{ name: 'jcr:primaryType', value: 'nt:unstructured' }];
+  return postMultipart(target, jcrPath, fields);
+}
+
+/**
+ * Borra un nodo (y todo su subárbol) con `:operation=delete`. Si el nodo no existía (404/410), se
+ * trata como éxito — no hay nada que borrar, típicamente porque es la primera vez que se sincroniza
+ * ese diálogo/nodo.
+ */
+export async function deleteNode(target: SyncTarget, jcrPath: string): Promise<SyncResult> {
+  const result = await postMultipart(target, jcrPath, [{ name: ':operation', value: 'delete' }]);
+  if (result.ok || result.status === 404 || result.status === 410) {
+    return { ok: true, status: result.status, message: result.ok ? 'OK' : 'No existía previamente — nada que borrar.' };
+  }
+  return result;
 }

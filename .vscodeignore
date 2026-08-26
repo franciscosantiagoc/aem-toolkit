@@ -5,4 +5,9 @@ tsconfig.json
 **/*.map
 **/tsconfig.json
 node_modules/**
+# Excepción: fast-xml-parser (y su única dependencia, strnum) SÍ se necesitan en tiempo de
+# ejecución para interpretar los .content.xml al sincronizar — sin esto, el .vsix empaquetado
+# fallaría con "Cannot find module 'fast-xml-parser'" en cuanto alguien sincronizara un content.xml.
+!node_modules/fast-xml-parser/**
+!node_modules/strnum/**
 FEATURES.md

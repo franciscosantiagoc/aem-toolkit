@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -140,7 +140,11 @@
       "properties": {
         "aemToolkit.mavenExecutable": {
           "type": "string",
-          "enum": ["auto", "mvn", "mvnw"],
+          "enum": [
+            "auto",
+            "mvn",
+            "mvnw"
+          ],
           "default": "auto",
           "description": "Ejecutable de Maven a usar. 'auto' usa './mvnw' (o '.\\mvnw.cmd' en Windows) si existe en la raíz del proyecto, y si no, cae a 'mvn' del PATH."
         },
@@ -197,7 +201,9 @@
           "type": "array",
           "scope": "resource",
           "maxItems": 2,
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Hasta 2 carpetas que contienen varias instalaciones de JDK (ej. 'C:\\\\Program Files\\\\Java', con subcarpetas jdk-11, jdk-17...). Si el proyecto necesita una versión de Java distinta a la del sistema, la extensión busca aquí una que coincida antes de preguntar. Config. de workspace."
         },
@@ -240,5 +246,8 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^2.24.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.7"
   }
 }

@@ -2,13 +2,18 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { toJcrPath } from './jcrPath';
-import { uploadFile, importContentXml, SyncTarget, SyncResult } from './slingClient';
+import { uploadFile, deleteNode, SyncTarget } from './slingClient';
+import { parseDocView, DocViewNode } from './docview';
+import { isEditDialogContentXml, pushNodeTree, detectLocalDeletions } from './contentXmlSync';
 
 export interface SyncFileOutcome {
   localPath: string;
   jcrPath: string;
   ok: boolean;
   message: string;
+  /** true si se sincronizó con éxito pero se detectaron eliminaciones locales que esta
+   * sincronización NO aplicó en el servidor (solo aplica a .content.xml que no son de diálogo). */
+  hasUnsyncedDeletions?: boolean;
 }
 
 let outputChannel: vscode.OutputChannel | undefined;
@@ -46,6 +51,59 @@ function collectFiles(fsPath: string): string[] {
   return out;
 }
 
+/**
+ * Sube un `.content.xml`: se parsea localmente (nunca se manda el XML crudo — ver la nota en
+ * `slingClient.ts` sobre por qué `:operation=import` con `:contentType=xml` no sirve para esto) y
+ * se reconstruye como una serie de POSTs normales de Sling, nodo por nodo.
+ *
+ * Para el diálogo de edición de un componente/página (`_cq_dialog`) se hace reemplazo total: se
+ * borra el nodo completo en el servidor y se recrea desde cero, así que tanto los cambios como las
+ * eliminaciones de campos quedan reflejados. Para cualquier otro `.content.xml` solo se
+ * crean/actualizan nodos y propiedades — nunca se borra nada — y si se detecta que el archivo
+ * local perdió algo respecto a la última versión commiteada en git, se avisa para que el usuario
+ * corra una compilación completa (que sí aplica esas eliminaciones vía instalación de paquete).
+ */
+async function syncContentXml(target: SyncTarget, fsPath: string, jcrPath: string): Promise<SyncFileOutcome> {
+  const nodePath = path.posix.dirname(jcrPath);
+  const xml = fs.readFileSync(fsPath, 'utf8');
+
+  let tree: DocViewNode;
+  try {
+    tree = parseDocView(xml);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { localPath: fsPath, jcrPath, ok: false, message: `No se pudo interpretar el XML: ${detail}` };
+  }
+
+  if (isEditDialogContentXml(fsPath)) {
+    const del = await deleteNode(target, nodePath);
+    if (!del.ok) {
+      return { localPath: fsPath, jcrPath, ok: false, message: `No se pudo limpiar el diálogo antes de recrearlo — ${del.message}` };
+    }
+    const results = await pushNodeTree(target, nodePath, tree);
+    const failed = results.find((r) => !r.ok);
+    return failed
+      ? { localPath: fsPath, jcrPath, ok: false, message: failed.message }
+      : { localPath: fsPath, jcrPath, ok: true, message: 'Diálogo reemplazado por completo (cambios y eliminaciones aplicados).' };
+  }
+
+  const results = await pushNodeTree(target, nodePath, tree);
+  const failed = results.find((r) => !r.ok);
+  if (failed) {
+    return { localPath: fsPath, jcrPath, ok: false, message: failed.message };
+  }
+  const hasUnsyncedDeletions = detectLocalDeletions(fsPath, tree);
+  return {
+    localPath: fsPath,
+    jcrPath,
+    ok: true,
+    message: hasUnsyncedDeletions
+      ? 'Sincronizado. Se detectaron elementos eliminados en este XML que esta sincronización no borra en el servidor — corre una compilación completa para aplicarlos.'
+      : 'OK',
+    hasUnsyncedDeletions
+  };
+}
+
 async function syncOneFile(target: SyncTarget, fsPath: string): Promise<SyncFileOutcome> {
   const jcrPath = toJcrPath(fsPath);
   if (!jcrPath) {
@@ -53,18 +111,13 @@ async function syncOneFile(target: SyncTarget, fsPath: string): Promise<SyncFile
   }
 
   const fileName = path.basename(fsPath);
-  const content = fs.readFileSync(fsPath);
-
-  let result: SyncResult;
   if (fileName === '.content.xml') {
-    // El .content.xml describe las propiedades del propio nodo padre (su carpeta contenedora),
-    // no de un hijo nuevo — se importa directamente sobre esa ruta.
-    const nodePath = path.posix.dirname(jcrPath);
-    result = await importContentXml(target, nodePath, content);
-  } else {
-    const parentPath = path.posix.dirname(jcrPath);
-    result = await uploadFile(target, parentPath, fileName, content);
+    return syncContentXml(target, fsPath, jcrPath);
   }
+
+  const content = fs.readFileSync(fsPath);
+  const parentPath = path.posix.dirname(jcrPath);
+  const result = await uploadFile(target, parentPath, fileName, content);
   return { localPath: fsPath, jcrPath, ok: result.ok, message: result.message };
 }
 
@@ -109,13 +162,15 @@ export async function syncUris(uris: vscode.Uri[], target: SyncTarget, targetLab
         });
         const outcome = await syncOneFile(target, fsPath);
         outcomes.push(outcome);
-        output.appendLine(outcome.ok ? `✔ ${outcome.jcrPath || fsPath}` : `✘ ${outcome.jcrPath || fsPath} — ${outcome.message}`);
+        const detail = outcome.ok && outcome.message !== 'OK' ? ` — ${outcome.message}` : outcome.ok ? '' : ` — ${outcome.message}`;
+        output.appendLine(`${outcome.ok ? '✔' : '✘'} ${outcome.jcrPath || fsPath}${detail}`);
       }
     }
   );
 
   const okCount = outcomes.filter((o) => o.ok).length;
   const failCount = outcomes.length - okCount;
+  const deletionWarnings = outcomes.filter((o) => o.hasUnsyncedDeletions);
 
   if (cancelled) {
     vscode.window.showWarningMessage(`⏹ Sincronización detenida — ${okCount} archivo(s) ya se habían subido a ${targetLabel}.`);
@@ -126,7 +181,9 @@ export async function syncUris(uris: vscode.Uri[], target: SyncTarget, targetLab
   if (outcomes.length === 1) {
     const only = outcomes[0];
     if (only.ok) {
-      vscode.window.showInformationMessage(`✔ Sincronizado con ${targetLabel}: ${only.jcrPath}`);
+      const detail = only.message !== 'OK' ? ` — ${only.message}` : '';
+      vscode.window.showInformationMessage(`✔ Sincronizado con ${targetLabel}: ${only.jcrPath}${detail}`);
+      if (only.hasUnsyncedDeletions) output.show(true);
     } else {
       vscode.window.showErrorMessage(`✘ No se pudo sincronizar ${path.basename(only.localPath)} — ${only.message}`);
       output.show(true);
@@ -135,7 +192,9 @@ export async function syncUris(uris: vscode.Uri[], target: SyncTarget, targetLab
   }
 
   if (failCount === 0) {
-    vscode.window.showInformationMessage(`✔ ${okCount} archivo(s) sincronizado(s) con ${targetLabel}.`);
+    const deletionNote = deletionWarnings.length > 0 ? ` (${deletionWarnings.length} con eliminaciones sin aplicar — revisa el canal de salida)` : '';
+    vscode.window.showInformationMessage(`✔ ${okCount} archivo(s) sincronizado(s) con ${targetLabel}.${deletionNote}`);
+    if (deletionWarnings.length > 0) output.show(true);
   } else {
     vscode.window.showWarningMessage(
       `${okCount} archivo(s) sincronizado(s), ${failCount} con error al sincronizar con ${targetLabel}. Revisa el canal de salida "AEM Toolkit — Sync".`
