@@ -169,13 +169,6 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   .status.success { color: var(--vscode-testing-iconPassed, #3fb950); font-weight: 600; }
   .checkbox-row { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
   .checkbox-row input { width:auto; margin:0; }
-  .copy-usage-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin: 2px 0 12px 0; }
-  .copy-usage-feedback { font-size:11px; color: var(--vscode-testing-iconPassed, #3fb950); opacity:0; transition: opacity .2s; }
-  .copy-usage-feedback.show { opacity:1; }
-  .copy-usage-preview {
-    font-family: var(--vscode-editor-font-family, monospace); font-size:11px; color: var(--vscode-descriptionForeground);
-    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,.15)); padding:2px 6px; border-radius:3px;
-  }
 </style>
 </head>
 <body>
@@ -501,23 +494,6 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     if (!name) return null;
     return buildUsageSnippet(name, typeForKind(item.kind), usageNoteForKind(item.kind));
   }
-  function renderCopyUsageRow(item) {
-    const info = getHtlUsageInfo(item);
-    if (!info) return null;
-    const row = el('div', { class: 'copy-usage-row' });
-    const feedback = el('span', { class: 'copy-usage-feedback' }, '✔ Copiado');
-    const btn = el('button', { class: 'secondary' }, '📋 Copiar cómo usarlo');
-    btn.addEventListener('click', () => {
-      vscode.postMessage({ type: 'copyToClipboard', text: info.text });
-      feedback.classList.add('show');
-      setTimeout(() => feedback.classList.remove('show'), 1600);
-    });
-    row.appendChild(btn);
-    row.appendChild(feedback);
-    row.appendChild(el('code', { class: 'copy-usage-preview' }, info.text));
-    return row;
-  }
-
   function renderPropertyEditor(item) {
     const box = el('div', { class: 'prop-editor' });
     if (item.kind === 'tab' || item.kind === 'fieldset') {
@@ -529,8 +505,6 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     }
     if (item.kind === 'unknown') {
       box.appendChild(el('div', { class: 'note' }, 'Este tipo de campo (', (item.rawNode.properties.find(p=>p.name==='sling:resourceType')||{values:['?']}).values[0], ') todavía no tiene edición dedicada — se conserva tal cual al guardar.'));
-      const copyRow = renderCopyUsageRow(item);
-      if (copyRow) box.appendChild(copyRow);
       return box;
     }
     if (item.kind === 'heading') {
@@ -543,20 +517,12 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     if (item.kind === 'hidden') {
       box.appendChild(el('label', {}, 'Nombre de propiedad (name)'));
       const nameInput = el('input', { type: 'text', value: getProp(item, 'name') || '' });
-      const hiddenCopyWrap = el('div', {});
-      function refreshHiddenCopyRow() {
-        hiddenCopyWrap.innerHTML = '';
-        const r = renderCopyUsageRow(item);
-        if (r) hiddenCopyWrap.appendChild(r);
-      }
-      nameInput.addEventListener('input', () => { setProp(item, 'name', 'String', nameInput.value); refreshHiddenCopyRow(); });
+      nameInput.addEventListener('input', () => setProp(item, 'name', 'String', nameInput.value));
       box.appendChild(nameInput);
       box.appendChild(el('label', {}, 'Valor'));
       const valInput = el('input', { type: 'text', value: getProp(item, 'value') || '' });
       valInput.addEventListener('input', () => setProp(item, 'value', 'String', valInput.value));
       box.appendChild(valInput);
-      refreshHiddenCopyRow();
-      box.appendChild(hiddenCopyWrap);
       return box;
     }
 
@@ -572,23 +538,15 @@ function renderDialogEditorHtml(tree: DialogTree): string {
     row1.appendChild(labelDiv);
     // 'multifield' no lleva 'name' propio (ver createNewItem) — su "nombre de propiedad" real es el
     // del campo interno repetido, que ya se edita más abajo en el bloque "multifield-inner".
-    const copyRowWrap = el('div', {});
-    function refreshCopyRow() {
-      copyRowWrap.innerHTML = '';
-      const r = renderCopyUsageRow(item);
-      if (r) copyRowWrap.appendChild(r);
-    }
     if (item.kind !== 'multifield') {
       const nameDiv = el('div', {}, el('label', {}, 'Nombre de propiedad (name)'), (() => {
         const i = el('input', { type: 'text', value: getProp(item, 'name') || '' });
-        i.addEventListener('input', () => { setProp(item, 'name', 'String', i.value); refreshCopyRow(); });
+        i.addEventListener('input', () => setProp(item, 'name', 'String', i.value));
         return i;
       })());
       row1.appendChild(nameDiv);
     }
     box.appendChild(row1);
-    refreshCopyRow();
-    box.appendChild(copyRowWrap);
 
     box.appendChild(el('label', {}, 'Descripción'));
     const descInput = el('input', { type: 'text', value: getProp(item, 'fieldDescription') || '' });
@@ -689,7 +647,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
         if (t.id === inner.kind) o.setAttribute('selected', 'selected');
         innerSelect.appendChild(o);
       });
-      innerSelect.addEventListener('change', () => { inner.kind = innerSelect.value; setMultifieldInner(item, inner); refreshCopyRow(); });
+      innerSelect.addEventListener('change', () => { inner.kind = innerSelect.value; setMultifieldInner(item, inner); });
       box.appendChild(innerSelect);
 
       box.appendChild(el('label', {}, 'Etiqueta del campo repetido'));
@@ -699,7 +657,7 @@ function renderDialogEditorHtml(tree: DialogTree): string {
 
       box.appendChild(el('label', {}, 'Nombre de propiedad del campo repetido'));
       const innerName = el('input', { type: 'text', value: inner.propertyName });
-      innerName.addEventListener('input', () => { inner.propertyName = innerName.value; setMultifieldInner(item, inner); refreshCopyRow(); });
+      innerName.addEventListener('input', () => { inner.propertyName = innerName.value; setMultifieldInner(item, inner); });
       box.appendChild(innerName);
     }
 
@@ -753,7 +711,23 @@ function renderDialogEditorHtml(tree: DialogTree): string {
         render();
       });
 
-      row.appendChild(up); row.appendChild(down); row.appendChild(badge); row.appendChild(label); row.appendChild(editBtn);
+      // "Copiar cómo usarlo": a la izquierda de "Editar" para que sea fácil de ver sin tener que
+      // desplegar el editor del campo. No se muestra para tipos sin propiedad JCR (pestaña,
+      // agrupador, encabezado) — ver getHtlUsageInfo.
+      const copyInfo = getHtlUsageInfo(item);
+      let copyBtn = null;
+      if (copyInfo) {
+        copyBtn = el('button', { class: 'icon', title: 'Copiar cómo usarlo: ' + copyInfo.text }, '📋');
+        copyBtn.addEventListener('click', () => {
+          vscode.postMessage({ type: 'copyToClipboard', text: copyInfo.text });
+          copyBtn.textContent = '✅';
+          setTimeout(() => { copyBtn.textContent = '📋'; }, 1200);
+        });
+      }
+
+      row.appendChild(up); row.appendChild(down); row.appendChild(badge); row.appendChild(label);
+      if (copyBtn) row.appendChild(copyBtn);
+      row.appendChild(editBtn);
 
       // "Mover a otra pestaña": solo tiene sentido si el diálogo usa pestañas y hay más de una.
       if (state.hasTabs && state.tabs.length > 1 && item.kind !== 'tab') {
