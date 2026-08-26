@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -102,6 +102,12 @@
         "icon": "$(edit)"
       },
       {
+        "command": "aemToolkit.dialogQuickAdd",
+        "title": "AEM: Diálogo",
+        "category": "AEM Toolkit",
+        "icon": "$(add)"
+      },
+      {
         "command": "aemToolkit.formatXml",
         "title": "AEM: Formatear XML",
         "category": "AEM Toolkit",
@@ -146,6 +152,11 @@
           "command": "aemToolkit.syncToPublish",
           "when": "resourcePath =~ /jcr_root/",
           "group": "aemToolkitSync@2"
+        },
+        {
+          "command": "aemToolkit.dialogQuickAdd",
+          "when": "resourceFilename == '_cq_dialog' || (resourceFilename == '.content.xml' && resourcePath =~ /_cq_dialog/)",
+          "group": "aemToolkitDialog@1"
         },
         {
           "command": "aemToolkit.formatXml",

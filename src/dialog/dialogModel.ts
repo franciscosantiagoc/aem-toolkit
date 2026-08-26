@@ -370,6 +370,37 @@ export function createNewItem(typeId: string, label: string, siblingNodeNames: s
     return { uiId: newUiId(), kind: def.id, nodeName, properties, children: [], rawNode };
   }
 
+  // "multifield" NO lleva 'name' en el nodo contenedor — en Granite UI real esa propiedad JCR la
+  // especifica únicamente el campo interno repetido (el nodo 'field' de abajo), nunca el propio
+  // multifield. Tenerla en los dos a la vez (bug real de una versión anterior: ambos terminaban con
+  // el mismo valor, ej. "./tags") hacía que Granite viera dos campos del formulario enlazados a la
+  // misma ruta al abrir el diálogo real en AEM — es lo que probablemente causaba el aviso de "valor
+  // repetido" al usarlo.
+  if (def.id === 'multifield') {
+    const properties: DocViewProperty[] = [
+      { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+      { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
+      { name: 'fieldLabel', type: 'String', multi: false, values: [label || def.label] }
+    ];
+    const rawNode: DocViewNode = {
+      name: nodeName,
+      properties,
+      children: [
+        {
+          name: 'field',
+          properties: [
+            { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+            { name: 'sling:resourceType', type: 'String', multi: false, values: [findFieldTypeById('textfield')!.resourceType] },
+            { name: 'fieldLabel', type: 'String', multi: false, values: ['Valor'] },
+            { name: 'name', type: 'String', multi: false, values: [`./${nodeName}`] }
+          ],
+          children: []
+        }
+      ]
+    };
+    return { uiId: newUiId(), kind: def.id, nodeName, properties, children: [], rawNode };
+  }
+
   const properties: DocViewProperty[] = [
     { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
     { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
@@ -380,18 +411,6 @@ export function createNewItem(typeId: string, label: string, siblingNodeNames: s
   const rawNode: DocViewNode = { name: nodeName, properties, children: [] };
   if (def.id === 'select' || def.id === 'radiogroup') {
     setSelectOptionsOnRaw(rawNode, [{ text: 'Opción 1', value: 'opcion1', selected: false }]);
-  }
-  if (def.id === 'multifield') {
-    rawNode.children.push({
-      name: 'field',
-      properties: [
-        { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
-        { name: 'sling:resourceType', type: 'String', multi: false, values: [findFieldTypeById('textfield')!.resourceType] },
-        { name: 'fieldLabel', type: 'String', multi: false, values: ['Valor'] },
-        { name: 'name', type: 'String', multi: false, values: [`./${nodeName}`] }
-      ],
-      children: []
-    });
   }
   return { uiId: newUiId(), kind: def.id, nodeName, properties, children: [], rawNode };
 }

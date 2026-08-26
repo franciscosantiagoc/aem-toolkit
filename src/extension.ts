@@ -5,6 +5,7 @@ import { CompileViewProvider, repeatLastCompile } from './compile/compilePanel';
 import { syncUris } from './sync/syncRunner';
 import { getSyncTarget, configureSyncCredentials } from './sync/credentials';
 import { openDialogEditor } from './dialog/dialogPanel';
+import { showDialogQuickAddMenu } from './dialog/dialogQuickAdd';
 import { formatXmlFiles } from './format/formatXmlCommand';
 
 function showProjectInfo(): void {
@@ -65,6 +66,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('aemToolkit.syncToPublish', (uri?: vscode.Uri, uris?: vscode.Uri[]) => runSync(context, 'publish', uri, uris)),
     vscode.commands.registerCommand('aemToolkit.configureSyncCredentials', () => configureSyncCredentials(context)),
     vscode.commands.registerCommand('aemToolkit.editDialog', (uri?: vscode.Uri) => openDialogEditor(context, uri)),
+    vscode.commands.registerCommand('aemToolkit.dialogQuickAdd', (uri?: vscode.Uri) => showDialogQuickAddMenu(context, uri)),
     vscode.commands.registerCommand('aemToolkit.formatXml', (uri?: vscode.Uri, uris?: vscode.Uri[]) => formatXmlFiles(resolveSelectedUris(uri, uris))),
     vscode.window.registerTreeDataProvider('aemToolkitView', treeProvider)
   );

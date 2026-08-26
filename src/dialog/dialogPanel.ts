@@ -159,6 +159,8 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   .note { color: var(--vscode-descriptionForeground); font-size:12px; font-style: italic; }
   .save-bar { position: sticky; bottom:0; background: var(--vscode-editor-background); padding: 10px 0; border-top: 1px solid var(--vscode-editorWidget-border, #3c3c3c); margin-top: 16px; display:flex; align-items:center; gap:10px; }
   .status { font-size:12px; color: var(--vscode-descriptionForeground); }
+  .status.error { color: var(--vscode-errorForeground, #f14c4c); font-weight: 600; }
+  .status.success { color: var(--vscode-testing-iconPassed, #3fb950); font-weight: 600; }
   .checkbox-row { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
   .checkbox-row input { width:auto; margin:0; }
 </style>
@@ -263,6 +265,29 @@ function renderDialogEditorHtml(tree: DialogTree): string {
       return { uiId: newUiId(), kind: typeId, nodeName, properties, children: [], rawNode: { name: nodeName, properties: properties.slice(), children: [] } };
     }
 
+    if (typeId === 'multifield') {
+      // 'multifield' NO lleva 'name' en el nodo contenedor — esa propiedad la lleva únicamente el
+      // campo interno repetido ('field' de abajo). Tenerla en los dos hacía que Granite viera dos
+      // campos enlazados a la misma ruta al abrir el diálogo real en AEM (probable causa del aviso
+      // de "valor repetido" al usar un multicampo).
+      const properties = [
+        { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+        { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
+        { name: 'fieldLabel', type: 'String', multi: false, values: [label || def.label] }
+      ];
+      const rawNode = {
+        name: nodeName, properties: properties.slice(), children: [{
+          name: 'field', properties: [
+            { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
+            { name: 'sling:resourceType', type: 'String', multi: false, values: [findTypeDef('textfield').resourceType] },
+            { name: 'fieldLabel', type: 'String', multi: false, values: ['Valor'] },
+            { name: 'name', type: 'String', multi: false, values: ['./' + nodeName] }
+          ], children: []
+        }]
+      };
+      return { uiId: newUiId(), kind: typeId, nodeName, properties, children: [], rawNode };
+    }
+
     const properties = [
       { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
       { name: 'sling:resourceType', type: 'String', multi: false, values: [def.resourceType] },
@@ -291,14 +316,6 @@ function renderDialogEditorHtml(tree: DialogTree): string {
           { name: 'text', type: 'String', multi: false, values: ['Opción 1'] },
           { name: 'value', type: 'String', multi: false, values: ['opcion1'] }
         ], children: [] }] });
-    }
-    if (typeId === 'multifield') {
-      rawNode.children.push({ name: 'field', properties: [
-        { name: 'jcr:primaryType', type: 'String', multi: false, values: ['nt:unstructured'] },
-        { name: 'sling:resourceType', type: 'String', multi: false, values: [findTypeDef('textfield').resourceType] },
-        { name: 'fieldLabel', type: 'String', multi: false, values: ['Valor'] },
-        { name: 'name', type: 'String', multi: false, values: ['./' + nodeName] }
-      ], children: [] });
     }
     return { uiId: newUiId(), kind: typeId, nodeName, properties, children: [], rawNode };
   }
@@ -464,12 +481,17 @@ function renderDialogEditorHtml(tree: DialogTree): string {
       i.addEventListener('input', () => { setProp(item, 'fieldLabel', 'String', i.value); render(); });
       return i;
     })());
-    const nameDiv = el('div', {}, el('label', {}, 'Nombre de propiedad (name)'), (() => {
-      const i = el('input', { type: 'text', value: getProp(item, 'name') || '' });
-      i.addEventListener('input', () => setProp(item, 'name', 'String', i.value));
-      return i;
-    })());
-    row1.appendChild(labelDiv); row1.appendChild(nameDiv);
+    row1.appendChild(labelDiv);
+    // 'multifield' no lleva 'name' propio (ver createNewItem) — su "nombre de propiedad" real es el
+    // del campo interno repetido, que ya se edita más abajo en el bloque "multifield-inner".
+    if (item.kind !== 'multifield') {
+      const nameDiv = el('div', {}, el('label', {}, 'Nombre de propiedad (name)'), (() => {
+        const i = el('input', { type: 'text', value: getProp(item, 'name') || '' });
+        i.addEventListener('input', () => setProp(item, 'name', 'String', i.value));
+        return i;
+      })());
+      row1.appendChild(nameDiv);
+    }
     box.appendChild(row1);
 
     box.appendChild(el('label', {}, 'Descripción'));
@@ -756,14 +778,24 @@ function renderDialogEditorHtml(tree: DialogTree): string {
   document.getElementById('dialogTitle').addEventListener('input', (e) => setRootTitle(e.target.value));
 
   document.getElementById('saveBtn').addEventListener('click', () => {
-    document.getElementById('statusText').textContent = 'Guardando...';
+    const statusEl = document.getElementById('statusText');
+    statusEl.textContent = 'Guardando...';
+    statusEl.classList.remove('error', 'success');
     vscode.postMessage({ type: 'save', rootProperties: state.rootProperties, hasTabs: state.hasTabs, tabs: state.tabs, items: state.items });
   });
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg.type === 'saved') {
-      document.getElementById('statusText').textContent = msg.ok ? '✔ Guardado' : ('✘ ' + msg.message);
+      const statusEl = document.getElementById('statusText');
+      statusEl.classList.remove('error', 'success');
+      if (msg.ok) {
+        statusEl.textContent = '✔ Guardado';
+        statusEl.classList.add('success');
+      } else {
+        statusEl.textContent = '✘ ' + msg.message;
+        statusEl.classList.add('error');
+      }
     }
   });
 

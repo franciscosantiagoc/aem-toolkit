@@ -58,28 +58,31 @@ export interface FieldTypeDef {
   isContainer: boolean;
 }
 
-/** Tipos disponibles en el selector "Agregar...", en el orden en que aparecen ahí. */
+/** Tipos disponibles en el selector "Agregar...", en el orden en que aparecen ahí. Los `label` están
+ * en inglés a propósito (v1.6.0, a pedido explícito): son los nombres con los que estos tipos de
+ * campo de Granite UI se conocen y documentan normalmente, así son más fáciles de identificar que
+ * una traducción libre al español. */
 export const FIELD_TYPES: FieldTypeDef[] = [
-  { id: 'tab', category: 'structural', label: 'Pestaña', resourceType: 'granite/ui/components/coral/foundation/container', propertyEditor: 'none', isContainer: true },
-  { id: 'fieldset', category: 'structural', label: 'Agrupador (con borde)', resourceType: 'granite/ui/components/coral/foundation/form/fieldset', propertyEditor: 'none', isContainer: true },
-  { id: 'textfield', category: 'field', label: 'Campo de texto', resourceType: 'granite/ui/components/coral/foundation/form/textfield', propertyEditor: 'textvalue', isContainer: false },
-  { id: 'textarea', category: 'field', label: 'Área de texto', resourceType: 'granite/ui/components/coral/foundation/form/textarea', propertyEditor: 'textvalue', isContainer: false },
-  { id: 'richtext', category: 'field', label: 'Texto enriquecido (RTE)', resourceType: 'cq/gui/components/authoring/dialog/richtext', propertyEditor: 'textvalue', isContainer: false },
-  { id: 'numberfield', category: 'field', label: 'Campo numérico', resourceType: 'granite/ui/components/coral/foundation/form/numberfield', propertyEditor: 'textvalue', isContainer: false },
-  { id: 'pathfield', category: 'field', label: 'Selector de ruta', resourceType: 'granite/ui/components/coral/foundation/form/pathfield', propertyEditor: 'pathfield', isContainer: false },
-  { id: 'pathbrowser', category: 'field', label: 'Selector de ruta (navegador)', resourceType: 'granite/ui/components/coral/foundation/form/pathbrowser', propertyEditor: 'pathfield', isContainer: false },
-  { id: 'select', category: 'field', label: 'Lista desplegable', resourceType: 'granite/ui/components/coral/foundation/form/select', propertyEditor: 'options', isContainer: false },
-  { id: 'radiogroup', category: 'field', label: 'Grupo de opciones (radio)', resourceType: 'granite/ui/components/coral/foundation/form/radiogroup', propertyEditor: 'options', isContainer: false },
-  { id: 'checkbox', category: 'field', label: 'Casilla', resourceType: 'granite/ui/components/coral/foundation/form/checkbox', propertyEditor: 'none', isContainer: false },
-  { id: 'switch', category: 'field', label: 'Interruptor (switch)', resourceType: 'granite/ui/components/coral/foundation/form/switch', propertyEditor: 'none', isContainer: false },
-  { id: 'multifield', category: 'field', label: 'Multicampo', resourceType: 'granite/ui/components/coral/foundation/form/multifield', propertyEditor: 'multifield-inner', isContainer: false },
-  { id: 'datepicker', category: 'field', label: 'Selector de fecha', resourceType: 'granite/ui/components/coral/foundation/form/datepicker', propertyEditor: 'datepicker', isContainer: false },
-  { id: 'fileupload', category: 'field', label: 'Carga de archivo', resourceType: 'cq/gui/components/authoring/dialog/fileupload', propertyEditor: 'fileupload', isContainer: false },
-  { id: 'colorfield', category: 'field', label: 'Selector de color', resourceType: 'granite/ui/components/coral/foundation/form/colorfield', propertyEditor: 'textvalue', isContainer: false },
-  { id: 'password', category: 'field', label: 'Contraseña', resourceType: 'granite/ui/components/coral/foundation/form/password', propertyEditor: 'textvalue', isContainer: false },
-  { id: 'hidden', category: 'field', label: 'Campo oculto', resourceType: 'granite/ui/components/coral/foundation/form/hidden', propertyEditor: 'none', isContainer: false },
-  { id: 'tags', category: 'field', label: 'Selector de tags', resourceType: 'cq/gui/components/authoring/dialog/tags', propertyEditor: 'pathfield', isContainer: false },
-  { id: 'heading', category: 'field', label: 'Encabezado (texto estático)', resourceType: 'granite/ui/components/coral/foundation/heading', propertyEditor: 'heading', isContainer: false }
+  { id: 'tab', category: 'structural', label: 'Tab', resourceType: 'granite/ui/components/coral/foundation/container', propertyEditor: 'none', isContainer: true },
+  { id: 'fieldset', category: 'structural', label: 'Fieldset', resourceType: 'granite/ui/components/coral/foundation/form/fieldset', propertyEditor: 'none', isContainer: true },
+  { id: 'textfield', category: 'field', label: 'Textfield', resourceType: 'granite/ui/components/coral/foundation/form/textfield', propertyEditor: 'textvalue', isContainer: false },
+  { id: 'textarea', category: 'field', label: 'Textarea', resourceType: 'granite/ui/components/coral/foundation/form/textarea', propertyEditor: 'textvalue', isContainer: false },
+  { id: 'richtext', category: 'field', label: 'Richtext (RTE)', resourceType: 'cq/gui/components/authoring/dialog/richtext', propertyEditor: 'textvalue', isContainer: false },
+  { id: 'numberfield', category: 'field', label: 'Number field', resourceType: 'granite/ui/components/coral/foundation/form/numberfield', propertyEditor: 'textvalue', isContainer: false },
+  { id: 'pathfield', category: 'field', label: 'Pathfield', resourceType: 'granite/ui/components/coral/foundation/form/pathfield', propertyEditor: 'pathfield', isContainer: false },
+  { id: 'pathbrowser', category: 'field', label: 'Pathbrowser', resourceType: 'granite/ui/components/coral/foundation/form/pathbrowser', propertyEditor: 'pathfield', isContainer: false },
+  { id: 'select', category: 'field', label: 'Select (dropdown)', resourceType: 'granite/ui/components/coral/foundation/form/select', propertyEditor: 'options', isContainer: false },
+  { id: 'radiogroup', category: 'field', label: 'Radio group', resourceType: 'granite/ui/components/coral/foundation/form/radiogroup', propertyEditor: 'options', isContainer: false },
+  { id: 'checkbox', category: 'field', label: 'Checkbox', resourceType: 'granite/ui/components/coral/foundation/form/checkbox', propertyEditor: 'none', isContainer: false },
+  { id: 'switch', category: 'field', label: 'Switch', resourceType: 'granite/ui/components/coral/foundation/form/switch', propertyEditor: 'none', isContainer: false },
+  { id: 'multifield', category: 'field', label: 'Multifield', resourceType: 'granite/ui/components/coral/foundation/form/multifield', propertyEditor: 'multifield-inner', isContainer: false },
+  { id: 'datepicker', category: 'field', label: 'Date picker', resourceType: 'granite/ui/components/coral/foundation/form/datepicker', propertyEditor: 'datepicker', isContainer: false },
+  { id: 'fileupload', category: 'field', label: 'File upload', resourceType: 'cq/gui/components/authoring/dialog/fileupload', propertyEditor: 'fileupload', isContainer: false },
+  { id: 'colorfield', category: 'field', label: 'Color field', resourceType: 'granite/ui/components/coral/foundation/form/colorfield', propertyEditor: 'textvalue', isContainer: false },
+  { id: 'password', category: 'field', label: 'Password', resourceType: 'granite/ui/components/coral/foundation/form/password', propertyEditor: 'textvalue', isContainer: false },
+  { id: 'hidden', category: 'field', label: 'Hidden field', resourceType: 'granite/ui/components/coral/foundation/form/hidden', propertyEditor: 'none', isContainer: false },
+  { id: 'tags', category: 'field', label: 'Tags', resourceType: 'cq/gui/components/authoring/dialog/tags', propertyEditor: 'pathfield', isContainer: false },
+  { id: 'heading', category: 'field', label: 'Heading', resourceType: 'granite/ui/components/coral/foundation/heading', propertyEditor: 'heading', isContainer: false }
 ];
 
 /** Alias retrocompatible: v1.4.0 exportaba este catálogo bajo este nombre ("los 10 tipos top").
