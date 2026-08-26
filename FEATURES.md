@@ -38,8 +38,8 @@ Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-
 | 16 | Renombrar componente (archivos + modelo + react/angular) | Media–Alta | ⏳ |
 | 17 | Crear **componente** completo (versionado, modelo, react opcional, css/js según `ui.frontend`) | Alta | ⏳ |
 | 18 | Generar **componente React/Angular** desde un componente ya creado (ajusta modelo, hashmap/mapper estilo `Cart.java`) | Alta | ⏳ |
-| 19 | **Diálogos**: formulario dinámico de campos (multifield, pathfield, switch, select, richtext…), visibilidad condicional, extensión de css/js, sincronización con el modelo | Muy alta | ⏳ |
-| 20 | Editar diálogos existentes + selección múltiple de componentes para unificar propiedades en tabs/multifield | Muy alta | ⏳ |
+| 19 | **Diálogos**: formulario dinámico de campos (multifield, pathfield, switch, select, richtext…), visibilidad condicional, extensión de css/js, sincronización con el modelo | Muy alta | 🟡 MVP en v1.4.0 (ver 3.10) |
+| 20 | Editar diálogos existentes + selección múltiple de componentes para unificar propiedades en tabs/multifield | Muy alta | 🟡 edición de uno solo cubierta por el MVP de v1.4.0 (ver 3.11); selección múltiple sigue ⏳ |
 | 21 | Diagnósticos en vivo de HTL (etiquetas sin cerrar, errores de sintaxis tipo "Error Lens") | Alta | ⏳ |
 | 22 | (Opcional, si es viable) Editar qué contenido se cachea/excluye (dispatcher) | Baja–Media | ⏳ |
 
@@ -135,23 +135,35 @@ Genera `Model.java` + interfaz si aplica, y si el usuario indica que consume un 
 ### 3.9 Servlet (Bloque 14)
 Pregunta método(s) HTTP (`GET/POST/PUT/DELETE/PATCH`, multi-select) y explica brevemente el uso típico de cada uno antes de generar (`@SlingServletPaths`/`@Component` con `sling.servlet.methods`).
 
-### 3.10 Diálogos de componente — el corazón de la extensión (Bloque 19)
-Webview de formulario dinámico:
-- Lista de campos ya soportados por Granite UI con buscador: textfield, textarea, richtext, numberfield, pathfield (con ruta raíz por defecto y filtro de extensiones de archivo permitidas), select, radiogroup, checkbox, switch, multifield, colorfield, datepicker, image upload, etc.
-- Por cada campo: nombre técnico, label, descripción/hint, y propiedades específicas del tipo (ej. pathfield → rootPath + filtro; select/radio → opciones con value/label).
-- **Visibilidad condicional**: cualquier campo puede declarar "mostrar solo si `<otroCampo>` = `<valor>`" (compatible con select, radiogroup y switch/checkbox como booleano) — se implementa igual que Core Components: `granite:data` con `cq-dialog-showhide-target` sobre el campo controlador, y una clase `cq-dialog-showhide-target-value-<valor>` en cada campo dependiente, más el `clientlib` `cq-dialog-show-hide.js` que ya trae Granite (no requiere JS propio salvo casos avanzados).
-- Extensión de CSS/JS del diálogo: si el usuario quiere personalizar apariencia/comportamiento del diálogo (no del componente en sí), se pregunta qué quiere tocar y se genera/edita un `clientlib` de categoría `cq.authoring.dialog`.
-- Si el componente ya tiene modelo Sling, las propiedades nuevas del diálogo se agregan automáticamente al modelo (`@ValueMapValue` + getter), sin pisar lo que ya existía.
+### 3.10 Diálogos de componente — el corazón de la extensión (Bloque 19) — 🟡 MVP en v1.4.0
+**Comando "AEM: Editar diálogo..."** (clic derecho sobre la carpeta `_cq_dialog` de un componente — o de una página/plantilla, mismo mecanismo `_cq_dialog` — o directamente sobre su `.content.xml`) abre un panel dedicado (`vscode.window.createWebviewPanel`, no una vista de la barra lateral — el formulario con pestañas/agrupadores anidados necesita más espacio horizontal) con el diálogo representado como un árbol visual editable.
+
+**Módulos internos** (`src/dialog/`):
+- `fieldCatalog.ts`: catálogo de los 10 tipos disponibles en v1.4.0 — pestaña, agrupador con borde (`granite/ui/components/coral/foundation/form/fieldset`), campo de texto, área de texto, texto enriquecido (RTE), campo numérico, selector de ruta, lista desplegable, casilla, multicampo. El modo "avanzado" con el catálogo completo (radiogroup, switch, colorfield, datepicker, fileupload/imagen, hidden, heading...) queda para una versión siguiente — es un recorte intencional, no un olvido.
+- `dialogModel.ts`: convierte entre el árbol JCR real (`DocViewNode` de `sync/docview.ts`, reutilizado tal cual) y un **modelo simplificado** (`DialogTree`: lista de pestañas, cada una con una lista de ítems — campo o agrupador, recursivo). Simplificaciones deliberadas de esta versión:
+  - Un diálogo siempre se representa como pestañas; si el original no las usaba (campos directo bajo `content`), se envuelven en una pestaña implícita "General" al abrirlo.
+  - Los layouts de columnas (`fixedcolumns`/`column`) se **aplanan** a una sola lista al cargar y **nunca se reintroducen** al guardar — un diálogo con 2 columnas queda en 1 columna después de editarlo con este panel. Es un tradeoff aceptado para no tener que construir también un editor de layout de columnas en esta primera versión.
+  - Cualquier campo de un tipo **fuera del top 10** ya presente en el diálogo se conserva como ítem "avanzado": se puede reordenar y eliminar, pero no editar en detalle — y su nodo XML original (incluidos sus propios hijos, ej. opciones anidadas) se preserva verbatim al guardar, para no destruir contenido que la extensión todavía no sabe interpretar del todo.
+  - `select`: sus opciones (nodo `items` hijo con `text`/`value`/`selected` por opción) sí tienen editor dedicado (agregar/quitar filas, marcar cuál es la predeterminada).
+  - `multifield`: v1.4.0 solo soporta el caso simple — un único campo interno repetible (`composite` con múltiples sub-campos por fila queda para después).
+- `docviewSerializer.ts`: **inverso** de `docview.ts#parseDocView` — hasta v1.3.0 la extensión solo sabía leer Document View XML (para sincronizar), nunca escribirlo; este módulo lo serializa de vuelta a texto, con las 4 namespaces estándar, escapando tipos (`{Boolean}`, arreglos `[a,b,c]` con comas escapadas) y caracteres XML.
+- `dialogPanel.ts`: arma el HTML del panel. Toda la interacción (agregar/reordenar/editar/eliminar pestañas, agrupadores y campos) ocurre en JS del lado del cliente sobre una copia en memoria del árbol simplificado (igual que el patrón ya usado en `compilePanel.ts`) — la conversión completa a/desde el árbol JCR real solo pasa por el lado de la extensión al abrir el panel y al guardar.
+
+**Guardar**: escribe el `.content.xml` en disco automáticamente (sin un paso de confirmación aparte — así lo pidió el usuario) y, después, pregunta con un modal si se quiere subir el cambio ahora a Author/Publish, reutilizando `syncUris` (que para `_cq_dialog/.content.xml` ya hace el reemplazo total de la v1.3.0) — o dejarlo para más tarde y subirlo manualmente después.
+
+**Pendiente para una versión futura** (no cubierto por el MVP): visibilidad condicional entre campos (`cq-dialog-showhide-target`), extensión de CSS/JS del diálogo vía `clientlib` propio, sincronización automática de propiedades nuevas con el modelo Sling del componente, y el catálogo "avanzado" completo.
+
+**Verificación realizada** (sin acceso a VS Code real ni a una instancia AEM): round-trip completo (`parseDocView` → `fromDocView` → editar el árbol → `toDocView` → `serializeDocView` → volver a parsear) contra el `.content.xml` real de `eventosgrid/_cq_dialog` de `italika-v2-cloud`, verificando que ediciones, reordenamientos, campos nuevos (incluida una opción de `select` con una coma literal) y valores con espacios al inicio sobrevivan intactos. La interacción del panel en sí (clics en agregar/editar/reordenar/eliminar/guardar) se probó cargando el HTML generado en un navegador headless (Playwright) con `acquireVsCodeApi` simulado, confirmando que el mensaje que se manda al guardar es exactamente lo que `dialogModel.ts`/`docviewSerializer.ts` esperan del lado de la extensión.
 
 ### 3.11 Editar diálogos + selección múltiple para tabs (Bloque 20)
-Sugerencia de flujo:
+La edición de **un solo componente** (abrir un diálogo ya existente y modificarlo) queda cubierta por el MVP de 3.10 — es el mismo panel, ya que "editar" y "crear campos nuevos en un diálogo existente" son la misma operación en este editor (agregar/quitar/reordenar sobre el árbol ya cargado).
+
+Sigue pendiente (no cubierto todavía) el flujo de **selección múltiple** para unificar propiedades de varios componentes a la vez:
 1. Click derecho sobre **uno o varios** componentes (VS Code permite selección múltiple nativa en el Explorer con Ctrl/Cmd+click o Shift+click; el `menu` `explorer/context` recibe todos los URIs seleccionados si el comando se registra sin filtro de `explorerResourceIsFolder` estricto) → "AEM Toolkit: Agregar propiedades…".
-2. Si es **un solo componente**: se abre el mismo formulario de 3.10 mostrando primero las propiedades ya existentes (leídas del `_cq_dialog/.content.xml`) en modo lectura/edición, con un botón "+ agregar más" al final.
-3. Si son **varios componentes seleccionados**: antes del formulario se pregunta la estrategia de unificación:
+2. Si son **varios componentes seleccionados**: antes de abrir el editor se pregunta la estrategia de unificación:
    - **Pestañas (tabs)**: cada componente pasa a ser una pestaña dentro de un diálogo combinado (útil para un "componente contenedor" que agrupa variantes).
    - **Multifield**: las propiedades comunes se agrupan como un único campo repetible.
    - **Cancelar / tratar cada uno por separado**.
-4. Al crear un diálogo desde cero (3.10) también se pregunta si se quieren pestañas, cuántas (máximo configurable, por defecto 10 vía `aemToolkit.maxDialogTabs`), y qué propiedades van en cada una — esto se resuelve con un Webview de **dos paneles**: izquierda = lista de pestañas (agregar/quitar/reordenar por drag), derecha = campos de la pestaña seleccionada (agregar/quitar/reordenar), en vez de formularios secuenciales separados, para que el usuario vea la estructura completa mientras arma el diálogo.
 
 ### 3.12 `data-sly-template` en `utils` (Bloque 4)
 Formulario simple: nombre de la plantilla + lista de atributos que recibe (`data-sly-template.nombre="${@ attr1, attr2}"`). Se crea en `components/utils` del proyecto (ruta detectada, ej. `apps/gatesconnect/components/utils`).

@@ -4,6 +4,7 @@ import { AemToolkitTreeProvider } from './treeView';
 import { CompileViewProvider, repeatLastCompile } from './compile/compilePanel';
 import { syncUris } from './sync/syncRunner';
 import { getSyncTarget, configureSyncCredentials } from './sync/credentials';
+import { openDialogEditor } from './dialog/dialogPanel';
 
 function showProjectInfo(): void {
   const projects = detectAemProjectsInWorkspace();
@@ -62,6 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('aemToolkit.syncToAuthor', (uri?: vscode.Uri, uris?: vscode.Uri[]) => runSync(context, 'author', uri, uris)),
     vscode.commands.registerCommand('aemToolkit.syncToPublish', (uri?: vscode.Uri, uris?: vscode.Uri[]) => runSync(context, 'publish', uri, uris)),
     vscode.commands.registerCommand('aemToolkit.configureSyncCredentials', () => configureSyncCredentials(context)),
+    vscode.commands.registerCommand('aemToolkit.editDialog', (uri?: vscode.Uri) => openDialogEditor(context, uri)),
     vscode.window.registerTreeDataProvider('aemToolkitView', treeProvider)
   );
 }

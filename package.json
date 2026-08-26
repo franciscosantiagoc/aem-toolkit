@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",
@@ -94,6 +94,12 @@
         "title": "AEM: Configurar credenciales de sincronización...",
         "category": "AEM Toolkit",
         "icon": "$(key)"
+      },
+      {
+        "command": "aemToolkit.editDialog",
+        "title": "AEM: Editar diálogo...",
+        "category": "AEM Toolkit",
+        "icon": "$(edit)"
       }
     ],
     "menus": {
@@ -112,6 +118,11 @@
           "command": "aemToolkit.syncToPublish",
           "when": "resourcePath =~ /jcr_root/",
           "group": "aemToolkitSync@2"
+        },
+        {
+          "command": "aemToolkit.editDialog",
+          "when": "resourceFilename == '_cq_dialog' || (resourceFilename == '.content.xml' && resourcePath =~ /_cq_dialog/)",
+          "group": "aemToolkitDialog@1"
         }
       ],
       "editor/context": [
