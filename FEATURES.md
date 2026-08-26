@@ -15,14 +15,18 @@ Se sigue el mismo patrón que ya usas en `angular-schematics-free` (mismo repo `
 - `config.ts` centraliza toda la configuración (`aemToolkit.*` en `settings.json`), igual que `angularSchematicsFree.*`.
 - **Buscador/filtro en todas las listas de selección**: cualquier `QuickPick` con más de ~6 opciones (componentes existentes, plantillas, campos de diálogo, perfiles Maven, idiomas, tags…) usa `vscode.window.showQuickPick` con `matchOnDescription`/`matchOnDetail` activados y una `placeHolder` que invite a escribir para filtrar. Para selecciones más ricas (formularios de content fragment, tags, diálogos) se usa un **Webview** con un `<input>` de filtro en vivo sobre listas largas (tipos de campo, componentes del proyecto, idiomas).
 
-## 1. Roadmap por bloques (ordenado por complejidad, de menor a mayor)
+## 1. Roadmap por bloques (reordenado en v2.0.0 por prioridad de construcción)
 
-Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-solvimas / Repsol-Lubricantes) y se comitea antes de pasar al siguiente. El orden es por **complejidad de implementación**, no por prioridad de uso — dos bloques marcados como "elegido para empezar" se adelantan porque son la base de todo lo demás.
+Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-solvimas / Repsol-Lubricantes) y se comitea antes de pasar al siguiente. **Hasta v1.8.x el orden de esta tabla era por complejidad de implementación** (de menor a mayor); **a partir de v2.0.0, a pedido explícito, el orden refleja qué sigue en prioridad de construcción**: primero la creación de componentes completa (con su clientlib de estilos/JS, consciente de si el proyecto tiene módulo `ui.frontend` activo o no), luego lo más cercano a eso (generar el componente React/Angular, y los diálogos — que ya tienen su MVP construido), y de ahí en más el resto en su orden original de complejidad. **El número de cada Bloque es un identificador estable** (no cambia al reordenar la tabla — son las mismas referencias "(Bloque N)" que usan los títulos de la sección 3), así que la columna `#` ya no queda en orden 1-2-3... secuencial: eso es intencional, no un error.
 
 | # | Bloque | Complejidad | Estado |
 |---|--------|:---:|---|
 | 1 | Cimientos: detección de proyecto (multi-módulo, ¿tiene `ui.frontend`?) + vista en barra de actividad + **Compilar proyecto** (front/back/ambos, perfiles, skip tests) | Baja–Media | ✅ v1.0.0 (estable) |
 | 2 | **Subir cambios de front sin compilar** (HTML/clientlibs/XML directo al JCR) | Baja–Media | ✅ v1.1.0 (sync de `.content.xml` corregido de fondo en v1.3.0) |
+| 17 | Crear **componente** completo (versionado, modelo, react opcional, **y su clientlib de estilos (CSS/SCSS/LESS) y JS**: si hay `ui.frontend` activo van ahí vía webpack; si no, se genera una clientlib clásica propia del componente en `ui.apps`) | Alta | 🔜 **próximo a construir** |
+| 18 | Generar **componente React/Angular** desde un componente ya creado (ajusta modelo, hashmap/mapper estilo `Cart.java`) | Alta | 🔜 depende del 17 |
+| 19 | **Diálogos**: formulario dinámico de campos (multifield, pathfield, switch, select, richtext…), visibilidad condicional, extensión de css/js, sincronización con el modelo | Muy alta | 🟡 MVP ampliado en v1.5.0/v1.7.0/v1.8.0 (ver 3.10) |
+| 20 | Editar diálogos existentes + selección múltiple de componentes para unificar propiedades en tabs/multifield | Muy alta | 🟡 edición de uno solo cubierta por el MVP (ver 3.11); selección múltiple sigue ⏳ |
 | 3 | Crear **tags** (formulario + instrucciones de uso) | Baja | ⏳ |
 | 4 | Crear **data-sly-template** en `components/utils` | Baja | ⏳ |
 | 5 | Crear **Content Fragment Model** (formulario de atributos + instrucciones de uso) | Media | ⏳ |
@@ -37,10 +41,6 @@ Cada bloque se construye, se prueba en un proyecto real (gatesconnect-aem / gnp-
 | 14 | Crear **servlet** (GET/POST/PUT/DELETE/PATCH) | Media–Alta | ⏳ |
 | 15 | Seleccionar texto → convertir a **i18n** (multi-idioma, modal, sustitución, edición posterior) | Media–Alta | ⏳ |
 | 16 | Renombrar componente (archivos + modelo + react/angular) | Media–Alta | ⏳ |
-| 17 | Crear **componente** completo (versionado, modelo, react opcional, css/js según `ui.frontend`) | Alta | ⏳ |
-| 18 | Generar **componente React/Angular** desde un componente ya creado (ajusta modelo, hashmap/mapper estilo `Cart.java`) | Alta | ⏳ |
-| 19 | **Diálogos**: formulario dinámico de campos (multifield, pathfield, switch, select, richtext…), visibilidad condicional, extensión de css/js, sincronización con el modelo | Muy alta | 🟡 MVP ampliado en v1.5.0 (ver 3.10) |
-| 20 | Editar diálogos existentes + selección múltiple de componentes para unificar propiedades en tabs/multifield | Muy alta | 🟡 edición de uno solo cubierta por el MVP (ver 3.11); selección múltiple sigue ⏳ |
 | 21 | Diagnósticos en vivo de HTL (etiquetas sin cerrar, errores de sintaxis tipo "Error Lens") | Alta | ⏳ |
 | 22 | (Opcional, si es viable) Editar qué contenido se cachea/excluye (dispatcher) | Baja–Media | ⏳ |
 
@@ -113,10 +113,14 @@ Sincroniza archivos directo al JCR sin pasar por Maven ni webpack, usando la **A
 - **Dependencia nueva (v1.3.0)**: `fast-xml-parser` (+ `strnum`, su única dependencia) para interpretar el Document View XML — ambas empaquetadas en el `.vsix` (excepción explícita en `.vscodeignore`, que por defecto excluye todo `node_modules/**`).
 - Verificado con un servidor Sling simulado (dentro del mismo proceso de Node, sin red real) contra el `.content.xml` real de `eventosgrid/_cq_dialog` del proyecto `italika-v2-cloud`: la secuencia de POSTs generada, el orden padre-antes-que-hijo, y los campos/tipos de cada propiedad se revisaron a mano — pero no se pudo probar contra una instancia AEM real desde este entorno (sin red hacia `localhost` del usuario), así que la primera sincronización de un diálogo real conviene probarla en un componente de prueba antes de confiar en el borrado.
 
-### 3.3 Crear componente (Bloque 17)
-- Pregunta: ¿versionado o no? ¿con modelo Sling o sin modelo (solo HTL estático)? Si detecta React en `ui.frontend` (por `package.json`/`webpack.config`), pregunta si se quiere generar también el componente React y ajusta el modelo para exponer sus props (ver 3.8).
-- Archivos por defecto: `.html`, `_cq_dialog/.content.xml`, `.content.xml` del componente. Si existe módulo `ui.frontend`: el JS/CSS/SASS/LESS (a elección del usuario) va ahí, en la carpeta del componente dentro de `src/main/webpack` o donde el proyecto los tenga. Si **no** existe `ui.frontend`: se crea una `clientlib` propia del componente con su `css.txt`/`js.txt` y archivos `.css`/`.js`.
-- Antes de crear, se puede **configurar** (checkbox recordado en settings) si por defecto se generan los archivos CSS/JS o se pregunta cada vez.
+### 3.3 Crear componente (Bloque 17) — 🔜 próximo bloque a construir (v2.0.0)
+- Pregunta: ¿versionado o no? ¿con modelo Sling o sin modelo (solo HTL estático)? Si detecta React en `ui.frontend` (por `package.json`/`webpack.config`), pregunta si se quiere generar también el componente React y ajusta el modelo para exponer sus props (ver Bloque 18 en la tabla del punto 1).
+- Archivos por defecto: `.html`, `_cq_dialog/.content.xml`, `.content.xml` del componente.
+- **Clientlib de estilos y JS, consciente de si `ui.frontend` está activo** (el foco inmediato de este bloque):
+  - **Con `ui.frontend` activo**: el JS y los estilos (CSS, SCSS o LESS, a elección del usuario) se generan ahí, en la carpeta del componente dentro de `src/main/webpack` (o donde el proyecto ya los tenga organizados) — se compilan vía webpack, no como clientlib clásica directa.
+  - **Sin `ui.frontend`**: se crea una `clientlib` propia del componente en `ui.apps` (con su `css.txt`/`js.txt` y los archivos `.css`/`.js` correspondientes), al estilo clásico de AEM.
+  - En ambos casos, el tipo de preprocesador de estilos (CSS puro / SCSS / LESS) se pregunta o se autodetecta del resto del proyecto (ej. si `ui.frontend` ya usa `.scss` en otros componentes).
+- Antes de crear, se puede **configurar** (checkbox recordado en settings, `aemToolkit.componentsCreateCssJsByDefault`) si por defecto se generan los archivos CSS/JS o se pregunta cada vez.
 
 ### 3.4 Experience Fragment (Bloque 11)
 Pregunta si usar un componente ya existente (selector con buscador sobre todos los componentes del proyecto) o crear uno nuevo para el XF.

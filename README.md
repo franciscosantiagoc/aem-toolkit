@@ -2,13 +2,65 @@
 
 Extensión de VS Code para acelerar el día a día en proyectos AEM (arquetipo Maven: `core` / `ui.apps` / `ui.content` / `ui.config` / `ui.frontend` opcional / `dispatcher` / `all`).
 
-Ver **FEATURES.md** (en esta misma carpeta) para la especificación completa, el roadmap por bloques (ordenado por complejidad) y el detalle de cada funcionalidad planeada. Ver **CHANGELOG.md** para el detalle de cada cambio, versión por versión.
+Ver **FEATURES.md** (en esta misma carpeta) para la especificación completa, el roadmap por bloques y el detalle de cada funcionalidad planeada. Ver **CHANGELOG.md** para el índice de changelogs — el detalle línea por línea de cada versión vive en un archivo por versión mayor (`CHANGELOG-1.0.0.md`, `CHANGELOG-2.0.0.md`, …) para que ninguno crezca sin límite.
 
 ## Cómo se versiona esta extensión
 
 - **1.0.0** es la primera versión estable. A partir de ella, las mejoras y nuevas funcionalidades se van agregando como versiones **1.x.x**.
 - Cuando un conjunto de cambios 1.x.x quede confirmado como estable, se pasa a una nueva versión mayor (**2.0.0**), **sin eliminar ni reescribir** la descripción de 1.0.0 de este README — queda como referencia permanente de lo que esa versión ofrecía.
-- Esta sección se amplía con una entrada nueva por cada versión mayor estable (1.0.0, 2.0.0, …), detallando qué hace y en qué se diferencia de la anterior. Para el detalle granular de cada 1.x.x intermedio (mientras se va validando hacia la próxima versión mayor), ver `CHANGELOG.md`.
+- Esta sección se amplía con una entrada nueva por cada versión mayor estable (1.0.0, 2.0.0, …), detallando qué hace y en qué se diferencia de la anterior. Para el detalle granular de cada 1.x.x intermedio (mientras se va validando hacia la próxima versión mayor), ver `CHANGELOG-1.0.0.md` (o el archivo de la serie mayor correspondiente — `CHANGELOG-2.0.0.md` para la 2.x.x en curso).
+
+## Versión 2.0.0 (estable) — Bloque 2: Sincronización + Bloque 19/20: Editor visual de diálogos
+
+Segunda versión mayor estable. Sobre la base de la 1.0.0 (detección de proyecto + Compilar), suma todo lo construido a lo largo de la serie **1.1.0 → 1.8.1** (ver `CHANGELOG-1.0.0.md` para el detalle versión por versión): subir cambios sin compilar, detección automática del JDK del proyecto, y el editor visual de diálogos con su propio submenú de acceso rápido.
+
+### Subir cambios de front sin compilar (Bloque 2)
+
+- **"AEM: Subir a Author"** / **"AEM: Subir a Publish"**, sobre un archivo o carpeta dentro de `jcr_root` — un archivo sube solo ese archivo, una carpeta sube todo su contenido de forma recursiva.
+- Sincroniza directo contra la **API POST de Sling** (sin Maven ni webpack de por medio). Requiere que el nodo padre ya exista en el servidor — pensado para actualizar algo ya instalado, no para crear estructura nueva desde cero.
+- **Fix real de fondo**: subir un `.content.xml` ahora lo interpreta localmente nodo por nodo (con sus propiedades y tipos — `{Boolean}`, `{Long}`, arreglos, mixins...) y lo reconstruye como una serie de POSTs normales de Sling, en vez de depender del "Import Operation" (`:contentType=xml`) que no entiende el formato Document View real de FileVault y devolvía HTTP 200 sin aplicar nada. Los diálogos de edición (`_cq_dialog`) se reemplazan por completo (los campos que borres del archivo también se borran en AEM); cualquier otro `.content.xml` solo crea/actualiza, nunca borra.
+- Barra de progreso cancelable con un canal de salida ("AEM Toolkit — Sync") que registra el resultado (✔/✘) de cada archivo.
+- **"AEM: Configurar credenciales de sincronización..."**: host/puerto de Author y Publish son configuración normal; la contraseña se guarda en VS Code Secret Storage, nunca en `settings.json`.
+
+### Detección automática del JDK requerido por el proyecto
+
+- **⚙️** en la barra de acciones rápidas del panel de Compilar: detectar el JDK de nuevo, configurar carpetas de búsqueda, configurar el JDK a mano, o abrir la configuración completa.
+- Lee la versión de Java que el proyecto requiere (`maven.compiler.release`/`target`/`source` o `java.version`) y, si no coincide con la del sistema, busca automáticamente una instalación que sí coincida en `aemToolkit.jdkSearchFolders` (hasta 2 carpetas "contenedoras" de varios JDKs) — sin preguntar nada si la encuentra. Si no puede resolverlo solo, avisa con un banner en el panel y pregunta antes de compilar si de todas formas quieres continuar.
+- `aemToolkit.javaHome` fija el JDK a mano para las Tasks de Maven de este proyecto (configuración de workspace, no toca nada global del sistema).
+
+### Editor visual de diálogos (Bloque 19/20 — MVP)
+
+- **"AEM: Editar diálogo..."** (clic derecho sobre `_cq_dialog` o su `.content.xml` en el Explorador) abre un panel dedicado con el diálogo como árbol visual editable: agregar, editar, reordenar y eliminar pestañas, agrupadores (fieldset) y campos.
+- **Catálogo de 20 tipos de campo** (labels en inglés — Textfield, Pathfield, Select, Checkbox, Switch, Multifield, Date picker, File upload, Tags, Heading, etc.), con editor dedicado por tipo (valor por defecto, opciones, ruta raíz, tipo de fecha, MIME types...). Cualquier campo de un tipo fuera del catálogo se conserva tal cual al guardar (no se destruye por no tener editor propio).
+- **Pestañas verdaderamente opcionales**: un diálogo sin pestañas se edita con sus campos planos directo en la raíz — nunca se envuelve forzosamente en una pestaña "General" sintética. Un botón dedicado las agrega cuando hace falta (moviendo los campos existentes a la primera automáticamente), sin poder anidar una segunda estructura de pestañas dentro de otra. Con más de una pestaña, cada campo se puede mover a otra con un clic (o eligiendo cuál, si hay más de dos).
+- **Multicampo (multifield)**: la propiedad real vive en su campo interno repetido (nunca en el contenedor — un bug de duplicado ahí fue la causa real del aviso de "valor repetido" al usarlo en AEM, corregido de fondo), y tanto crearlo como editar su campo interno (tipo, etiqueta, nombre de propiedad) queda cubierto.
+- **XML generado con formato propio**: abertura de etiqueta + primer atributo en la primera línea, atributos adicionales uno por línea indentados un nivel más, cierre de etiqueta siempre en su propia línea alineado con su abertura — nunca autocierre, incluso en nodos sin hijos.
+- **"AEM: Diálogo"** (nuevo acceso rápido, clic derecho **dentro del código** de un diálogo ya abierto): selector con los 5 tipos más usados — Textfield, Pathfield, Checkbox, Select, Multifield — más "Edición avanzada" para abrir el panel completo. Resuelve solo en qué pestaña insertar (pregunta solo si hay más de una) y ofrece subir el cambio a Author/Publish al toque.
+- **📋 "Copiar cómo usarlo"**, ícono en la fila de cada campo (a la izquierda de ✏️ Editar): copia al portapapeles la expresión HTL típica para leer esa propiedad (`${properties.nombre}`) con un comentario del tipo de dato esperado (String, Number, Boolean, Calendar, String[]...) — el tooltip muestra el texto exacto antes de copiarlo.
+- **Guardar**: escribe el `.content.xml` en disco y pregunta si se quiere subir el cambio ahora a Author/Publish. El estado de guardado se ve en rojo si falló, verde si salió bien.
+
+### "AEM: Formatear XML" — de propósito general
+
+- Aplica el mismo formato de indentación del editor de diálogos a **cualquier** `.xml` de Document View del proyecto (no solo diálogos): clic derecho sobre uno o varios `.xml` dentro de `jcr_root`. No reescribe el archivo si ya estaba formateado igual.
+- Detecta y preserva las namespaces reales del archivo original (más allá de las 4 estándar `jcr`/`sling`/`cq`/`nt`) para no perder namespaces propias (ej. `granite`) al reformatear.
+
+### Menús contextuales agrupados
+
+Todos los comandos anteriores quedan bajo un único submenú desplegable **"AEM Toolkit"** (con el ícono de la barra de actividad) tanto en el Explorador como dentro del código — en vez de aparecer como entradas sueltas mezcladas con el resto del menú contextual de VS Code.
+
+### Comandos
+
+- **AEM: Compilar proyecto...** / **AEM: Repetir última compilación** / **AEM: Mostrar información del proyecto detectado** / **AEM: Actualizar detección de proyecto** (Bloque 1, v1.0.0)
+- **AEM: Subir a Author** / **AEM: Subir a Publish** / **AEM: Configurar credenciales de sincronización...** (Bloque 2)
+- **AEM: Editar diálogo...** (Explorador) / **AEM: Diálogo** (acceso rápido, dentro del código) (Bloque 19/20)
+- **AEM: Formatear XML**
+
+### Configuración adicional (`aemToolkit.*`) sobre la de v1.0.0
+
+- `javaHome`, `jdkSearchFolders` — JDK del proyecto.
+- `sync.authorHost`/`authorPort`/`publishHost`/`publishPort`/`username` — destinos de sincronización (la contraseña vive en Secret Storage, no aquí).
+- `maxDialogTabs` — tope de pestañas al armar un diálogo.
+- `componentsCreateCssJsByDefault`, `defaultLocales`, `namespace`, `componentsUtilsPath` — ya configurables, preparados para los próximos bloques (creación de componentes/clientlibs/i18n, ver `FEATURES.md`) que todavía no están implementados.
 
 ## Versión 1.0.0 (estable) — Bloque 1: Cimientos + Compilar
 
