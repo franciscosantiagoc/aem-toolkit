@@ -118,13 +118,13 @@ export function htlMarkup(opts: HtlMarkupOptions): string {
   if (frontendBundled) {
     lines.push('  <!-- Estilos/JS de este componente compilados con webpack (ui.frontend) — se cargan junto con el resto del sitio, no hay una categoría de clientlib propia de este componente que embeber aquí. -->');
   }
+  lines.push('  <!-- TODO: contenido del componente -->');
   if (includePlaceholder) {
     lines.push(`  <sly data-sly-test="\${wcmmode.edit}">`);
     lines.push(`    <div class="cq-placeholder" data-emptytext="${title}" data-sly-unwrap></div>`);
     lines.push('  </sly>');
     lines.push('  <!-- TODO: reemplaza este placeholder por una condición real una vez el diálogo tenga campos -->');
   }
-  lines.push('  <!-- TODO: contenido del componente -->');
   if (clientlib && clientlib.embedsJs) {
     lines.push(`  <sly data-sly-call="\${clientlib.js @ categories='${clientlib.category}'}"/>`);
   }

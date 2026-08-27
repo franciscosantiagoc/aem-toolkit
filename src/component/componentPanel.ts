@@ -194,7 +194,22 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     opt.textContent = ext.toUpperCase();
     styleExtSelect.appendChild(opt);
   });
-  styleExtSelect.value = scan.dominantStyleExt || detected[0] || 'css';
+
+  // Por defecto: con ui.frontend se respeta la extensión dominante/detectada del proyecto (ya usa
+  // un preprocesador vía webpack); con clientlib clásica se prefiere CSS (sin paso de compilación
+  // en ui.apps) — el usuario puede cambiarlo igual, y a partir de ahí deja de recalcularse solo.
+  function updateStyleExtDefault() {
+    if (styleExtSelect.dataset.userEdited) return;
+    const useFrontend = state.hasFrontendModule && addToFrontendInput.checked;
+    if (useFrontend) {
+      styleExtSelect.value = scan.dominantStyleExt || detected[0] || 'css';
+      return;
+    }
+    const hasCssOption = Array.prototype.some.call(styleExtSelect.options, function (o) { return o.value === 'css'; });
+    styleExtSelect.value = hasCssOption ? 'css' : (scan.dominantStyleExt || detected[0] || 'css');
+  }
+  styleExtSelect.addEventListener('change', function () { styleExtSelect.dataset.userEdited = '1'; });
+  updateStyleExtDefault();
 
   function titleFromName(name) {
     return name.split(/[-_]+/).filter(Boolean).map(function (w) {
@@ -296,9 +311,9 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     frontendRow.style.display = show ? 'flex' : 'none';
     frontendDesc.style.display = show ? 'block' : 'none';
   }
-  generateStylesInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); });
+  generateStylesInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); updateStyleExtDefault(); });
   generateJsInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); });
-  addToFrontendInput.addEventListener('change', function () { requestDefaultAssetsDir(); requestAssetPaths(); });
+  addToFrontendInput.addEventListener('change', function () { requestDefaultAssetsDir(); requestAssetPaths(); updateStyleExtDefault(); });
   updateFrontendVisibility();
   updateAssetsDirVisibility();
 
