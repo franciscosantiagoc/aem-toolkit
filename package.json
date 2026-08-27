@@ -2,7 +2,7 @@
   "name": "aem-toolkit",
   "displayName": "AEM Toolkit",
   "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
-  "version": "2.1.7",
+  "version": "2.1.8",
   "publisher": "local-dev",
   "private": true,
   "license": "MIT",

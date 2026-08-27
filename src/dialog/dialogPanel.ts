@@ -73,6 +73,11 @@ export async function openDialogEditor(context: vscode.ExtensionContext, uri?: v
   // "granite") — se reusan al guardar para no perder namespaces propias al reserializar el árbol.
   const namespaces = mergeNamespaces(extractRootNamespaces(rawXml));
 
+  // Abre también el .content.xml crudo como pestaña de texto normal, a pedido explícito, para que el
+  // usuario pueda decidir con cuál de los dos interactuar — el editor visual (creado justo debajo)
+  // queda como el enfocado al terminar, ya que sigue siendo la forma principal de trabajar el diálogo.
+  await vscode.window.showTextDocument(vscode.Uri.file(fsPath), { preview: false });
+
   const panel = vscode.window.createWebviewPanel('aemToolkitDialogEditor', `Diálogo: ${path.basename(path.dirname(fsPath))}`, vscode.ViewColumn.Active, {
     enableScripts: true,
     retainContextWhenHidden: true

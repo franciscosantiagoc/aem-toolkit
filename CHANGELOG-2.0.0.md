@@ -2,6 +2,10 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.8 — El editor visual de diálogos también abre el XML crudo
+
+- **A pedido explícito**: al abrir el editor visual de un diálogo (`openDialogEditor`, compartida por el comando "AEM: Editar diálogo...", "AEM: Diálogo" y la apertura automática al crear un componente), ahora también se abre el `_cq_dialog/.content.xml` crudo como pestaña de texto normal — antes solo se abría el formulario visual. El editor visual queda como pestaña activa al terminar (sigue siendo la forma principal de trabajar el diálogo), pero el XML queda disponible como otra pestaña para quien prefiera mirarlo o editarlo directamente.
+
 ## 2.1.7 — Apertura automática de archivos + no sobrescribir una clientlib ya existente
 
 - **A pedido explícito**: al crear el componente, con la opción "Abrir el diálogo apenas se cree el componente" (activada por defecto, ahora también cubre esto) se abren automáticamente, en este orden, como pestañas: la hoja de estilos (si se generó), el `.html` del componente, y por último el `_cq_dialog` en el editor visual (queda como pestaña activa). El JS no se abre solo. Si el switch está desactivado, no se abre nada automáticamente.
