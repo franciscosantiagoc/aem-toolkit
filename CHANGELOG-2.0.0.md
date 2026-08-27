@@ -2,6 +2,13 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.12 — Carpetas de estilos/JS personalizables por separado en ui.frontend + explorador interno
+
+- **A pedido explícito, solo aplica con `ui.frontend`**: cuando estilos y JS están ambos activos, aparece un nuevo switch "Personalizar carpetas de estilos y JS por separado". Desactivado (default): los 2 campos de referencia (`Carpeta de estilos` / `Carpeta de JS`) quedan bloqueados, reflejando la misma carpeta base de siempre. Activado: se desbloquean para editar cada ruta de forma independiente (arrancan del valor compartido actual como punto de partida), y la carpeta base de arriba se oculta al dejar de ser la fuente única. En clientlib clásica no cambia nada (CSS y JS siguen yendo cada uno a su propia subcarpeta `css/`/`js/` dentro de la misma carpeta base, sin esta opción).
+- El mensaje de confirmación tras crear el componente ahora reporta "CSS en ..." y "JS en ..." por separado cuando ambas rutas terminan siendo distintas, en vez de asumir una única carpeta compartida.
+- **A pedido explícito**: el botón "📁 Elegir..." (de la carpeta base y de los 2 campos separados) ya no abre el selector nativo de carpetas del sistema operativo — abre un explorador de carpetas embebido dentro del propio panel, que solo permite navegar dentro de la carpeta raíz del proyecto actual (nunca por encima de ella) y oculta ruido (`node_modules`, `dist`, `target`, `out`, `coverage`, carpetas ocultas). El campo de texto sigue editable a mano en paralelo.
+- Nuevas funciones: `computeAssetSubPaths` (`componentGenerator.ts`) acepta ahora una carpeta de JS opcional distinta a la de CSS; `listProjectDir` (`componentCreate.ts`) resuelve la navegación del explorador interno, confinada a la raíz del proyecto.
+
 ## 2.1.11 — Crear la siguiente versión directamente al hacer clic sobre un componente ya versionado
 
 - **A pedido explícito, cierra un pendiente que había quedado abierto en la v2.1.10**: al hacer clic derecho con "Crear componente" directamente sobre la carpeta de un componente **ya versionado** (proxy con subcarpetas `vN`), antes se mostraba solo un aviso pidiendo repetir el flujo desde `components` con el mismo nombre. Ahora se pregunta directo con un modal ("¿Deseas crear 'vN+1' a partir de 'vN'?", mostrando los números reales) y, al confirmar, se crea la versión nueva sin pasar por el formulario.

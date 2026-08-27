@@ -8,6 +8,10 @@ export interface ComponentPanelInitialState {
   hasFrontendModule: boolean;
   scan: ComponentsFolderScan;
   cssJsDefault: boolean;
+  /** Raíz del proyecto Maven — usada por el explorador interno de carpetas (v2.1.12) para confinar
+   * la navegación a la carpeta del proyecto actual en vez de abrir el selector nativo del sistema
+   * operativo (que permite ir a cualquier parte del disco). */
+  projectRootPath: string;
 }
 
 export function buildComponentPanelInitialState(project: AemProjectInfo, scan: ComponentsFolderScan): ComponentPanelInitialState {
@@ -15,7 +19,8 @@ export function buildComponentPanelInitialState(project: AemProjectInfo, scan: C
     namespace: project.namespace ?? '<namespace>',
     hasFrontendModule: project.hasFrontendModule,
     scan,
-    cssJsDefault: getConfig().componentsCreateCssJsByDefault
+    cssJsDefault: getConfig().componentsCreateCssJsByDefault,
+    projectRootPath: project.rootPath
   };
 }
 
@@ -66,6 +71,22 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   .assets-dir-row input { flex:1; margin:0; }
   button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); white-space: nowrap; }
   button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+  .folder-explorer-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index: 1000;
+  }
+  .folder-explorer-modal {
+    background: var(--vscode-editor-background); border: 1px solid var(--vscode-editorWidget-border, #3c3c3c);
+    border-radius: 6px; width: 480px; max-width: 90vw; max-height: 70vh; display:flex; flex-direction:column; padding: 12px;
+  }
+  .folder-explorer-header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+  .folder-explorer-header strong { font-size: 13px; }
+  .folder-explorer-header button { padding: 2px 8px; }
+  .folder-explorer-path { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 8px; word-break: break-all; }
+  .folder-explorer-list { flex:1; overflow-y:auto; border: 1px solid var(--vscode-editorWidget-border, #3c3c3c); border-radius:4px; padding: 4px; min-height: 160px; }
+  .folder-explorer-item { padding: 5px 8px; cursor:pointer; border-radius: 3px; font-size: 13px; }
+  .folder-explorer-item:hover { background: var(--vscode-list-hoverBackground); }
+  .folder-explorer-empty { color: var(--vscode-descriptionForeground); font-size: 12px; padding: 8px; }
+  .folder-explorer-actions { display:flex; gap:8px; margin-top: 10px; align-items:center; }
 </style>
 </head>
 <body>
@@ -109,14 +130,41 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   <div class="switch-desc" id="frontendDesc" style="display:none">Desactivado: se crea una clientlib clásica propia del componente en su lugar.</div>
 
   <div id="assetsDirBlock" style="display:none">
-    <label>Carpeta base donde se generarán los estilos/JS</label>
-    <div class="assets-dir-row">
-      <input type="text" id="assetsDir" />
-      <button type="button" class="secondary" id="browseAssetsDir">📁 Elegir...</button>
+    <div id="baseAssetsDirRow">
+      <label>Carpeta base donde se generarán los estilos/JS</label>
+      <div class="assets-dir-row">
+        <input type="text" id="assetsDir" />
+        <button type="button" class="secondary" id="browseAssetsDir">📁 Elegir...</button>
+      </div>
+      <div class="switch-desc">Se precarga sola según nombre/versión y si usas el módulo frontend o una clientlib — puedes cambiarla a mano o con "Elegir...". Con clientlib clásica, CSS y JS se generan cada uno en su propia subcarpeta dentro de esta, para no aglomerarlos si luego agregas más ficheros.</div>
     </div>
-    <div class="switch-desc">Se precarga sola según nombre/versión y si usas el módulo frontend o una clientlib — puedes cambiarla a mano o con "Elegir...". Con clientlib clásica, CSS y JS se generan cada uno en su propia subcarpeta dentro de esta, para no aglomerarlos si luego agregas más ficheros.</div>
+
+    <!-- Clientlib clásica: vista previa de las 2 rutas resultantes (sin edición aparte, sin cambios desde v2.1.5). -->
     <div class="path-preview" id="cssDirPreview" style="display:none"></div>
     <div class="path-preview" id="jsDirPreview" style="display:none"></div>
+
+    <!-- ui.frontend con estilos Y JS activos (agregado en v2.1.12, a pedido explícito): permite ver
+         (siempre, como referencia) y opcionalmente personalizar cada ruta por separado. -->
+    <div class="switch-row" id="splitAssetsDirsRow" style="display:none">
+      <input type="checkbox" id="splitAssetsDirs" />
+      <span class="switch-label">Personalizar carpetas de estilos y JS por separado</span>
+    </div>
+    <div class="switch-desc" id="splitAssetsDirsDesc" style="display:none">Desactivado: estilos y JS comparten la carpeta de arriba (los 2 campos de abajo son solo de referencia, bloqueados). Actívalo para elegir una carpeta distinta para cada uno.</div>
+
+    <div id="cssAssetsDirRow" style="display:none">
+      <label>Carpeta de estilos</label>
+      <div class="assets-dir-row">
+        <input type="text" id="cssAssetsDir" disabled />
+        <button type="button" class="secondary" id="browseCssAssetsDir" disabled>📁 Elegir...</button>
+      </div>
+    </div>
+    <div id="jsAssetsDirRow" style="display:none">
+      <label>Carpeta de JS</label>
+      <div class="assets-dir-row">
+        <input type="text" id="jsAssetsDir" disabled />
+        <button type="button" class="secondary" id="browseJsAssetsDir" disabled>📁 Elegir...</button>
+      </div>
+    </div>
   </div>
 
   <details>
@@ -148,6 +196,25 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     <span class="status" id="statusText"></span>
   </div>
 
+  <!-- Explorador interno de carpetas del proyecto (v2.1.12) — reemplaza al selector nativo del SO
+       para los botones "Elegir..." de arriba: solo muestra rutas dentro de la carpeta del proyecto. -->
+  <div class="folder-explorer-overlay" id="folderExplorerOverlay" style="display:none">
+    <div class="folder-explorer-modal">
+      <div class="folder-explorer-header">
+        <strong>Elegir carpeta del proyecto</strong>
+        <button type="button" class="secondary" id="folderExplorerClose">✕</button>
+      </div>
+      <div class="folder-explorer-path" id="folderExplorerPath"></div>
+      <div class="folder-explorer-list" id="folderExplorerList"></div>
+      <div class="folder-explorer-actions">
+        <button type="button" class="secondary" id="folderExplorerUp">⬆ Subir</button>
+        <span style="flex:1"></span>
+        <button type="button" class="secondary" id="folderExplorerCancel">Cancelar</button>
+        <button type="button" id="folderExplorerUse">Usar esta carpeta</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 (function () {
   const vscode = acquireVsCodeApi();
@@ -169,12 +236,30 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   const frontendDesc = document.getElementById('frontendDesc');
   const addToFrontendInput = document.getElementById('addToFrontend');
   const assetsDirBlock = document.getElementById('assetsDirBlock');
+  const baseAssetsDirRow = document.getElementById('baseAssetsDirRow');
   const assetsDirInput = document.getElementById('assetsDir');
   const browseAssetsDirBtn = document.getElementById('browseAssetsDir');
   const cssDirPreview = document.getElementById('cssDirPreview');
   const jsDirPreview = document.getElementById('jsDirPreview');
+  const splitAssetsDirsRow = document.getElementById('splitAssetsDirsRow');
+  const splitAssetsDirsDesc = document.getElementById('splitAssetsDirsDesc');
+  const splitAssetsDirsInput = document.getElementById('splitAssetsDirs');
+  const cssAssetsDirRow = document.getElementById('cssAssetsDirRow');
+  const cssAssetsDirInput = document.getElementById('cssAssetsDir');
+  const browseCssAssetsDirBtn = document.getElementById('browseCssAssetsDir');
+  const jsAssetsDirRow = document.getElementById('jsAssetsDirRow');
+  const jsAssetsDirInput = document.getElementById('jsAssetsDir');
+  const browseJsAssetsDirBtn = document.getElementById('browseJsAssetsDir');
   const createBtn = document.getElementById('createBtn');
   const statusText = document.getElementById('statusText');
+
+  const folderExplorerOverlay = document.getElementById('folderExplorerOverlay');
+  const folderExplorerPath = document.getElementById('folderExplorerPath');
+  const folderExplorerList = document.getElementById('folderExplorerList');
+  const folderExplorerUpBtn = document.getElementById('folderExplorerUp');
+  const folderExplorerCloseBtn = document.getElementById('folderExplorerClose');
+  const folderExplorerCancelBtn = document.getElementById('folderExplorerCancel');
+  const folderExplorerUseBtn = document.getElementById('folderExplorerUse');
 
   generateStylesInput.checked = state.cssJsDefault;
   generateJsInput.checked = state.cssJsDefault;
@@ -268,22 +353,67 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     if (!titleInput.dataset.userEdited) titleInput.value = titleFromName(name);
   }
 
-  function updateAssetsDirVisibility() {
-    const show = generateStylesInput.checked || generateJsInput.checked;
-    assetsDirBlock.style.display = show ? 'block' : 'none';
+  function useFrontendMode() {
+    return state.hasFrontendModule && addToFrontendInput.checked;
   }
 
-  function updateAssetPathPreviews() {
-    const dir = assetsDirInput.value.trim();
-    cssDirPreview.style.display = generateStylesInput.checked && dir ? 'block' : 'none';
-    jsDirPreview.style.display = generateJsInput.checked && dir ? 'block' : 'none';
+  function splitAssetsDirsActive() {
+    return splitAssetsDirsRow.style.display !== 'none' && splitAssetsDirsInput.checked;
+  }
+
+  // Con ui.frontend, CSS y JS van siempre a la misma carpeta salvo "Personalizar..." (v2.1.12) — en
+  // ese caso no hace falta ida y vuelta al lado de la extensión (no hay ninguna subcarpeta que
+  // calcular, es la carpeta base tal cual), así que se refleja directo del lado del cliente.
+  function syncFrontendAssetInputs() {
+    if (!useFrontendMode() || splitAssetsDirsActive()) return;
+    const dir = assetsDirInput.value;
+    cssAssetsDirInput.value = dir;
+    jsAssetsDirInput.value = dir;
+  }
+
+  function updateAssetsDirVisibility() {
+    const anyAsset = generateStylesInput.checked || generateJsInput.checked;
+    assetsDirBlock.style.display = anyAsset ? 'block' : 'none';
+    if (!anyAsset) return;
+
+    const frontend = useFrontendMode();
+    const bothActive = generateStylesInput.checked && generateJsInput.checked;
+    const showSplit = frontend && bothActive;
+
+    splitAssetsDirsRow.style.display = showSplit ? 'flex' : 'none';
+    splitAssetsDirsDesc.style.display = showSplit ? 'block' : 'none';
+    if (!showSplit) splitAssetsDirsInput.checked = false;
+
+    const splitActive = showSplit && splitAssetsDirsInput.checked;
+
+    // Carpeta base: siempre visible en clientlib clásica; en ui.frontend se oculta cuando se
+    // personaliza por separado, porque deja de ser la fuente de la que derivan CSS y JS.
+    baseAssetsDirRow.style.display = !frontend || !splitActive ? 'block' : 'none';
+
+    // Vista previa de 2 rutas de clientlib clásica (sin cambios desde v2.1.5 — no aplica a ui.frontend).
+    cssDirPreview.style.display = !frontend && generateStylesInput.checked && assetsDirInput.value.trim() ? 'block' : 'none';
+    jsDirPreview.style.display = !frontend && generateJsInput.checked && assetsDirInput.value.trim() ? 'block' : 'none';
+
+    // ui.frontend: filas de estilos/JS por separado — visibles según cuál esté activo; editables
+    // solo si "Personalizar..." está encendido, si no, de solo referencia (mismo valor que la base).
+    cssAssetsDirRow.style.display = frontend && generateStylesInput.checked ? 'block' : 'none';
+    jsAssetsDirRow.style.display = frontend && generateJsInput.checked ? 'block' : 'none';
+    cssAssetsDirInput.disabled = !splitActive;
+    jsAssetsDirInput.disabled = !splitActive;
+    browseCssAssetsDirBtn.disabled = !splitActive;
+    browseJsAssetsDirBtn.disabled = !splitActive;
+
+    syncFrontendAssetInputs();
   }
 
   function requestAssetPaths() {
+    if (useFrontendMode()) {
+      syncFrontendAssetInputs();
+      return;
+    }
     const dir = assetsDirInput.value.trim();
-    if (!dir) { cssDirPreview.textContent = ''; jsDirPreview.textContent = ''; updateAssetPathPreviews(); return; }
-    const useFrontend = state.hasFrontendModule && addToFrontendInput.checked;
-    vscode.postMessage({ type: 'computeAssetPaths', assetsDir: dir, useFrontend: useFrontend });
+    if (!dir) { cssDirPreview.textContent = ''; jsDirPreview.textContent = ''; updateAssetsDirVisibility(); return; }
+    vscode.postMessage({ type: 'computeAssetPaths', assetsDir: dir, useFrontend: false });
   }
 
   function requestDefaultAssetsDir() {
@@ -313,13 +443,84 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   }
   generateStylesInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); updateStyleExtDefault(); });
   generateJsInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); });
-  addToFrontendInput.addEventListener('change', function () { requestDefaultAssetsDir(); requestAssetPaths(); updateStyleExtDefault(); });
+  addToFrontendInput.addEventListener('change', function () { updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); updateStyleExtDefault(); });
   updateFrontendVisibility();
   updateAssetsDirVisibility();
 
   assetsDirInput.addEventListener('input', function () { assetsDirInput.dataset.userEdited = '1'; requestAssetPaths(); });
-  browseAssetsDirBtn.addEventListener('click', function () {
-    vscode.postMessage({ type: 'browseFolder', current: assetsDirInput.value.trim() });
+  browseAssetsDirBtn.addEventListener('click', function () { openFolderExplorer(assetsDirInput); });
+
+  // "Personalizar carpetas de estilos y JS por separado" (ui.frontend, v2.1.12): al activarlo, los
+  // 2 campos arrancan editables desde el valor compartido actual (si el usuario aún no los tocó a
+  // mano); al desactivarlo, se olvida cualquier edición manual y vuelven a reflejar la carpeta base.
+  splitAssetsDirsInput.addEventListener('change', function () {
+    if (splitAssetsDirsInput.checked) {
+      if (!cssAssetsDirInput.dataset.userEdited) cssAssetsDirInput.value = assetsDirInput.value;
+      if (!jsAssetsDirInput.dataset.userEdited) jsAssetsDirInput.value = assetsDirInput.value;
+    } else {
+      delete cssAssetsDirInput.dataset.userEdited;
+      delete jsAssetsDirInput.dataset.userEdited;
+    }
+    updateAssetsDirVisibility();
+  });
+  cssAssetsDirInput.addEventListener('input', function () { cssAssetsDirInput.dataset.userEdited = '1'; });
+  jsAssetsDirInput.addEventListener('input', function () { jsAssetsDirInput.dataset.userEdited = '1'; });
+  browseCssAssetsDirBtn.addEventListener('click', function () { openFolderExplorer(cssAssetsDirInput); });
+  browseJsAssetsDirBtn.addEventListener('click', function () { openFolderExplorer(jsAssetsDirInput); });
+
+  // Explorador interno de carpetas del proyecto (v2.1.12) — reemplaza al selector nativo del SO:
+  // solo navega dentro de la raíz del proyecto (confinado también del lado de la extensión, ver
+  // listProjectDir en componentCreate.ts), así el usuario no puede irse a cualquier parte del disco.
+  let explorerTargetInput = null;
+  let explorerCurrentPath = null;
+  let explorerParentPath = null;
+
+  function openFolderExplorer(targetInput) {
+    explorerTargetInput = targetInput;
+    const start = targetInput.value.trim() || state.projectRootPath;
+    folderExplorerOverlay.style.display = 'flex';
+    vscode.postMessage({ type: 'listDir', path: start });
+  }
+
+  function closeFolderExplorer() {
+    folderExplorerOverlay.style.display = 'none';
+    explorerTargetInput = null;
+  }
+
+  function renderDirListing(data) {
+    explorerCurrentPath = data.path;
+    explorerParentPath = data.parentPath;
+    folderExplorerPath.textContent = data.relativePath || '.';
+    folderExplorerUpBtn.disabled = !data.parentPath;
+    folderExplorerList.innerHTML = '';
+    if (!data.entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'folder-explorer-empty';
+      empty.textContent = 'No hay subcarpetas aquí.';
+      folderExplorerList.appendChild(empty);
+      return;
+    }
+    data.entries.forEach(function (entry) {
+      const item = document.createElement('div');
+      item.className = 'folder-explorer-item';
+      item.textContent = '📁 ' + entry.name;
+      item.addEventListener('click', function () { vscode.postMessage({ type: 'listDir', path: entry.path }); });
+      folderExplorerList.appendChild(item);
+    });
+  }
+
+  folderExplorerUpBtn.addEventListener('click', function () {
+    if (explorerParentPath) vscode.postMessage({ type: 'listDir', path: explorerParentPath });
+  });
+  folderExplorerCloseBtn.addEventListener('click', closeFolderExplorer);
+  folderExplorerCancelBtn.addEventListener('click', closeFolderExplorer);
+  folderExplorerUseBtn.addEventListener('click', function () {
+    if (explorerTargetInput && explorerCurrentPath) {
+      explorerTargetInput.value = explorerCurrentPath;
+      explorerTargetInput.dataset.userEdited = '1';
+      requestAssetPaths();
+    }
+    closeFolderExplorer();
   });
 
   createBtn.addEventListener('click', function () {
@@ -344,7 +545,10 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
         styleExt: styleExtSelect.value,
         generateJs: generateJsInput.checked,
         addToFrontend: state.hasFrontendModule ? addToFrontendInput.checked : false,
-        assetsDir: (generateStylesInput.checked || generateJsInput.checked) ? (assetsDirInput.value.trim() || undefined) : undefined,
+        assetsDir: (generateStylesInput.checked || generateJsInput.checked)
+          ? ((splitAssetsDirsActive() ? cssAssetsDirInput.value.trim() : assetsDirInput.value.trim()) || undefined)
+          : undefined,
+        jsAssetsDir: splitAssetsDirsActive() ? (jsAssetsDirInput.value.trim() || undefined) : undefined,
         advanced: {
           editConfig: document.getElementById('advEditConfig').checked,
           designDialog: document.getElementById('advDesignDialog').checked,
@@ -370,17 +574,19 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     }
     if (msg.type === 'defaultAssetsDir') {
       if (!assetsDirInput.dataset.userEdited) assetsDirInput.value = msg.path;
-      requestAssetPaths();
-    }
-    if (msg.type === 'folderPicked') {
-      assetsDirInput.value = msg.path;
-      assetsDirInput.dataset.userEdited = '1';
+      // Los campos separados de ui.frontend arrancan del mismo valor por defecto mientras el
+      // usuario no los haya editado a mano por separado (ver "Personalizar...", v2.1.12).
+      if (!cssAssetsDirInput.dataset.userEdited) cssAssetsDirInput.value = msg.path;
+      if (!jsAssetsDirInput.dataset.userEdited) jsAssetsDirInput.value = msg.path;
       requestAssetPaths();
     }
     if (msg.type === 'assetPaths') {
       cssDirPreview.textContent = '📄 CSS: ' + msg.cssDir;
       jsDirPreview.textContent = '📄 JS: ' + msg.jsDir;
-      updateAssetPathPreviews();
+      updateAssetsDirVisibility();
+    }
+    if (msg.type === 'dirListing') {
+      renderDirListing(msg);
     }
   });
 

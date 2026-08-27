@@ -13,6 +13,53 @@ function isValidStyleExt(v: unknown): v is 'css' | 'scss' | 'less' {
   return v === 'css' || v === 'scss' || v === 'less';
 }
 
+/** Carpetas que no aportan al elegir dónde generar estilos/JS (dependencias, builds, control de
+ * versiones) — se ocultan del explorador interno para no ensuciar la navegación; el usuario que de
+ * verdad necesite entrar ahí siempre puede escribir la ruta a mano en el campo de texto. */
+const EXPLORER_IGNORED_DIR_NAMES = new Set(['node_modules', 'target', 'dist', 'out', 'coverage']);
+
+export interface DirListing {
+  path: string;
+  relativePath: string;
+  parentPath: string | null;
+  entries: { name: string; path: string }[];
+}
+
+/**
+ * Lista las subcarpetas (solo carpetas, nunca archivos) de `requestedPath`, confinando la navegación
+ * dentro de `rootPath` — a pedido explícito (v2.1.12), el botón "Elegir..." del formulario de crear
+ * componente pasa a abrir este explorador interno (embebido en el propio panel) en vez del selector
+ * nativo del sistema operativo, mostrando solo rutas de la carpeta del proyecto actual. Si
+ * `requestedPath` queda fuera de `rootPath` (ruta manual rara, o restos de un estado previo), se
+ * cae a `rootPath` en vez de fallar. Si la carpeta pedida no existe todavía (ej. el usuario escribió
+ * a mano una ruta nueva que aún no se creó), se devuelve vacía en vez de romper el explorador — el
+ * usuario igual puede confirmar esa ruta con "Usar esta carpeta" sin que exista aún en disco.
+ */
+export function listProjectDir(rootPath: string, requestedPath: string): DirListing {
+  const resolvedRoot = path.resolve(rootPath);
+  let resolved = path.resolve(requestedPath);
+  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path.sep)) {
+    resolved = resolvedRoot;
+  }
+
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(resolved, { withFileTypes: true });
+  } catch {
+    entries = [];
+  }
+
+  const dirEntries = entries
+    .filter((e) => e.isDirectory() && !EXPLORER_IGNORED_DIR_NAMES.has(e.name) && !e.name.startsWith('.'))
+    .map((e) => ({ name: e.name, path: path.join(resolved, e.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const parentPath = resolved === resolvedRoot ? null : path.dirname(resolved);
+  const relativePath = resolved === resolvedRoot ? '.' : path.relative(resolvedRoot, resolved).split(path.sep).join('/');
+
+  return { path: resolved, relativePath, parentPath, entries: dirEntries };
+}
+
 function validatePayload(payload: any): payload is ComponentCreatePayload {
   if (!payload || typeof payload !== 'object') return false;
   if (typeof payload.name !== 'string' || !isValidJcrNodeName(payload.name)) return false;
@@ -22,6 +69,7 @@ function validatePayload(payload: any): payload is ComponentCreatePayload {
   if (payload.generateStyles && !isValidStyleExt(payload.styleExt)) return false;
   if (typeof payload.addToFrontend !== 'boolean') return false;
   if (payload.assetsDir !== undefined && typeof payload.assetsDir !== 'string') return false;
+  if (payload.jsAssetsDir !== undefined && typeof payload.jsAssetsDir !== 'string') return false;
   const adv = payload.advanced;
   if (!adv || typeof adv !== 'object') return false;
   for (const k of ['editConfig', 'designDialog', 'template', 'placeholder', 'openDialogAfterCreate']) {
@@ -155,26 +203,18 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
 
     if (msg?.type === 'computeAssetPaths') {
       const assetsDir = typeof msg.assetsDir === 'string' ? msg.assetsDir.trim() : '';
+      const jsAssetsDir = typeof msg.jsAssetsDir === 'string' ? msg.jsAssetsDir.trim() : undefined;
       if (assetsDir) {
-        const { cssDir, jsDir } = computeAssetSubPaths(assetsDir, !!msg.useFrontend);
+        const { cssDir, jsDir } = computeAssetSubPaths(assetsDir, !!msg.useFrontend, jsAssetsDir);
         panel.webview.postMessage({ type: 'assetPaths', cssDir, jsDir });
       }
       return;
     }
 
-    if (msg?.type === 'browseFolder') {
-      const current = typeof msg.current === 'string' ? msg.current : '';
-      const anchor = current && fs.existsSync(current) ? current : componentsPath;
-      const picked = await vscode.window.showOpenDialog({
-        canSelectFolders: true,
-        canSelectFiles: false,
-        canSelectMany: false,
-        defaultUri: vscode.Uri.file(anchor),
-        openLabel: 'Elegir carpeta'
-      });
-      if (picked && picked[0]) {
-        panel.webview.postMessage({ type: 'folderPicked', path: picked[0].fsPath });
-      }
+    if (msg?.type === 'listDir') {
+      const requested = typeof msg.path === 'string' && msg.path.trim() ? msg.path.trim() : project.rootPath;
+      const listing = listProjectDir(project.rootPath, requested);
+      panel.webview.postMessage({ type: 'dirListing', ...listing });
       return;
     }
 
@@ -227,8 +267,16 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
         if (payload.generateJs) parts.push(`JS en "${path.join(relClientlib, 'js')}"`);
         if (parts.length) message += ` ${parts.join(', ')}.`;
       } else if (plan.webpackAssets && (plan.webpackAssets.styleFile || plan.webpackAssets.jsFile)) {
-        const assetsRelDir = path.dirname(plan.webpackAssets.styleFile ?? plan.webpackAssets.jsFile ?? '');
-        message += ` Estilos/JS en "${path.relative(project.rootPath, assetsRelDir)}".`;
+        // Con "Personalizar carpetas de estilos y JS por separado" (v2.1.12) ambas pueden diferir —
+        // se reporta cada una por su nombre en vez de asumir una única carpeta compartida.
+        const styleDir = plan.webpackAssets.styleFile ? path.dirname(plan.webpackAssets.styleFile) : undefined;
+        const jsDir = plan.webpackAssets.jsFile ? path.dirname(plan.webpackAssets.jsFile) : undefined;
+        if (styleDir && jsDir && styleDir !== jsDir) {
+          message += ` CSS en "${path.relative(project.rootPath, styleDir)}", JS en "${path.relative(project.rootPath, jsDir)}".`;
+        } else {
+          const assetsRelDir = path.relative(project.rootPath, (styleDir ?? jsDir)!);
+          message += ` Estilos/JS en "${assetsRelDir}".`;
+        }
       }
       if (plan.preservedExistingFiles.length) {
         const relPreserved = plan.preservedExistingFiles.map((p) => `"${path.relative(project.rootPath, p)}"`);

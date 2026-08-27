@@ -25,8 +25,15 @@ export interface ComponentCreatePayload {
   generateJs: boolean;
   addToFrontend: boolean;
   /** Carpeta elegida por el usuario para los estilos/JS (absoluta), o undefined/vacío para usar la
-   * calculada por defecto (`computeDefaultAssetsDir`) según `addToFrontend`. */
+   * calculada por defecto (`computeDefaultAssetsDir`) según `addToFrontend`. Con `ui.frontend` y
+   * `jsAssetsDir` personalizado (ver abajo), esta pasa a representar solo la carpeta de estilos. */
   assetsDir: string | undefined;
+  /** Solo aplica con `ui.frontend` activo: carpeta distinta para el JS cuando el usuario activó
+   * "Personalizar carpetas de estilos y JS por separado" en el formulario — undefined (el caso
+   * normal) significa que JS comparte la misma carpeta que `assetsDir`. Se ignora por completo en
+   * clientlib clásica, donde CSS/JS ya van cada uno en su propia subcarpeta (`css/`/`js/`) dentro de
+   * una única carpeta base — no hay necesidad de una carpeta base distinta ahí. */
+  jsAssetsDir: string | undefined;
   advanced: {
     editConfig: boolean;
     designDialog: boolean;
@@ -104,14 +111,19 @@ export function computeDefaultAssetsDir(
  * vista previa del formulario (`componentCreate.ts` responde al mensaje `computeAssetPaths` con
  * esto), para que nunca queden desincronizadas.
  *
- * Con `ui.frontend`, CSS y JS van juntos en la misma carpeta del componente (convención webpack ya
- * existente — no es una clientlib, no hay problema de aglomeración de archivos de otro tipo). Con
- * clientlib clásica, cada uno va en su propia subcarpeta (`css/`, `js/`) dentro de la carpeta base,
- * a pedido explícito, para que no se aglomeren archivos de distinto tipo en la raíz de la clientlib
- * y el usuario pueda seguir agregando más ficheros ahí sin ensuciarla.
+ * Con `ui.frontend`, CSS y JS van por defecto juntos en la misma carpeta del componente (convención
+ * webpack ya existente — no es una clientlib, no hay problema de aglomeración de archivos de otro
+ * tipo) — salvo que `jsAssetsDir` venga con un valor propio (a pedido explícito, v2.1.12: el usuario
+ * activó "Personalizar carpetas de estilos y JS por separado" en el formulario), en cuyo caso el JS
+ * va a esa carpeta distinta en vez de compartir la de `assetsDir`. Con clientlib clásica, cada uno va
+ * siempre en su propia subcarpeta (`css/`, `js/`) dentro de la carpeta base — `jsAssetsDir` se ignora
+ * ahí por completo, no aplica (ver comentario en `ComponentCreatePayload.jsAssetsDir`).
  */
-export function computeAssetSubPaths(assetsDir: string, useFrontend: boolean): { cssDir: string; jsDir: string } {
-  if (useFrontend) return { cssDir: assetsDir, jsDir: assetsDir };
+export function computeAssetSubPaths(assetsDir: string, useFrontend: boolean, jsAssetsDir?: string): { cssDir: string; jsDir: string } {
+  if (useFrontend) {
+    const jsDir = jsAssetsDir && jsAssetsDir.trim() ? jsAssetsDir.trim() : assetsDir;
+    return { cssDir: assetsDir, jsDir };
+  }
   return { cssDir: path.join(assetsDir, 'css'), jsDir: path.join(assetsDir, 'js') };
 }
 
@@ -222,7 +234,8 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
 
   let webpackAssets: ComponentCreatePlan['webpackAssets'];
   if (useFrontend) {
-    const { cssDir, jsDir } = computeAssetSubPaths(assetsDir, true); // ambas === assetsDir en este modo
+    // Ambas === assetsDir salvo que el usuario haya personalizado jsAssetsDir por separado (v2.1.12).
+    const { cssDir, jsDir } = computeAssetSubPaths(assetsDir, true, payload.jsAssetsDir);
     let styleFile: string | undefined;
     let jsFile: string | undefined;
     if (payload.generateStyles) {
