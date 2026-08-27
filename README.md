@@ -8,7 +8,31 @@ Ver **FEATURES.md** (en esta misma carpeta) para la especificación completa, el
 
 - **1.0.0** es la primera versión estable. A partir de ella, las mejoras y nuevas funcionalidades se van agregando como versiones **1.x.x**.
 - Cuando un conjunto de cambios 1.x.x quede confirmado como estable, se pasa a una nueva versión mayor (**2.0.0**), **sin eliminar ni reescribir** la descripción de 1.0.0 de este README — queda como referencia permanente de lo que esa versión ofrecía.
-- Esta sección se amplía con una entrada nueva por cada versión mayor estable (1.0.0, 2.0.0, …), detallando qué hace y en qué se diferencia de la anterior. Para el detalle granular de cada 1.x.x intermedio (mientras se va validando hacia la próxima versión mayor), ver `CHANGELOG-1.0.0.md` (o el archivo de la serie mayor correspondiente — `CHANGELOG-2.0.0.md` para la 2.x.x en curso).
+- Esta sección se amplía con una entrada nueva por cada versión mayor estable (1.0.0, 2.0.0, …), detallando qué hace y en qué se diferencia de la anterior. Para el detalle granular de cada 1.x.x intermedio (mientras se va validando hacia la próxima versión mayor), ver `CHANGELOG-1.0.0.md` (o el archivo de la serie mayor correspondiente — `CHANGELOG-3.0.0.md` para la 3.x.x en curso).
+
+## Versión 3.0.0 (estable) — Bloque 17: Crear componente
+
+Tercera versión mayor estable. Sobre la base de la 2.0.0 (sincronización + editor visual de diálogos), suma todo lo construido a lo largo de la serie **2.1.0 → 2.1.12** (ver `CHANGELOG-2.0.0.md` para el detalle versión por versión): el asistente **"AEM: Crear componente..."** completo.
+
+### Crear componente (Bloque 17 — primera iteración; modelo Sling queda pendiente)
+
+- **"Crear nuevo..." → "Componente"**, clic derecho sobre cualquier carpeta dentro de `ui.apps`: formulario Webview con nombre (validado en vivo contra la convención del proyecto y la ruta resultante), título, grupo de componentes con autocompletado, switch de versionado, switches de estilos/JS con selector de preprocesador (autodetecta el dominante del proyecto, o pide elegir si están mezclados), switch "Añadir al módulo frontend" (si el proyecto tiene `ui.frontend`), y una sección de opciones avanzadas (`_cq_editConfig.xml` de refresco automático, `_cq_design_dialog`, `_cq_template`, placeholder de autoría, apertura automática de estilos/HTML/diálogo al crear).
+- **Esquema de versionado "proxy"** (patrón estándar de Adobe): `components/<nombre>` es un proxy sin versión (`sling:resourceSuperType` apuntando a la versión vigente); la implementación real vive en `components/<nombre>/v1`, `v2`... — el proxy se reescribe para apuntar a la versión nueva cada vez que se agrega una.
+- **Clic derecho directamente sobre un componente ya existente** resuelve sin pasar por el formulario: si no está versionado, ofrece convertirlo en variante (mueve su contenido a `v1`, lo convierte en proxy y duplica `v1` en `v2`); si ya está versionado, ofrece crear directamente la siguiente versión (duplicando la más alta existente y reescribiendo solo el `sling:resourceSuperType` del proxy).
+- **Clientlib consciente de `ui.frontend`**: con frontend activo, los estilos/JS se generan en `ui.frontend/src/main/webpack/components/<nombre>` (o en las 2 carpetas independientes que el usuario elija por separado) y la extensión intenta registrarlos sola en el entrypoint de webpack; sin frontend, se crea una clientlib clásica en `ui.apps` (`clientlibs/clientlib-components/<nombre>`, con CSS y JS en su propia subcarpeta), embebida inline en el HTL con el patrón `clientlib.html` de AEM Core Components — compartida entre todas las versiones de un mismo componente, y nunca sobrescrita si ya existía contenido personalizado ahí.
+- **Carpeta de estilos/JS totalmente personalizable**: campo de texto + explorador de carpetas **embebido dentro del propio panel** (no el selector nativo del sistema operativo), confinado a la carpeta raíz del proyecto actual. Con `ui.frontend` y estilos+JS ambos activos, un switch adicional permite editar la ruta de estilos y la de JS de forma independiente (por defecto ambas reflejan la misma carpeta base).
+- Todo el XML generado (`.content.xml`, `_cq_dialog`, `_cq_editConfig.xml`, `_cq_design_dialog`, `_cq_template`, clientlib clásica) se escribe ya formateado con el mismo estilo que usa "AEM: Formatear XML".
+- El estilo generado arranca con la clase raíz en BEM `.<nombre>-cmp`, ya conectada al elemento raíz del `.html`.
+- **Pendiente para una siguiente iteración**: modelo Sling (con/sin modelo) y el componente React/Angular del Bloque 18, que depende de este.
+
+### Comandos
+
+- **AEM: Crear componente...** (submenú "Crear nuevo..." dentro de "AEM Toolkit", clic derecho sobre cualquier carpeta de `ui.apps`) (Bloque 17)
+
+### Configuración adicional (`aemToolkit.*`) sobre la de v2.0.0
+
+- `componentsCreateCssJsByDefault` — genera CSS/JS sin preguntar cada vez al crear un componente.
+- `componentsUtilsPath`, `defaultLocales`, `namespace` — ya configurables, preparados para los próximos bloques (i18n, tags, CF Model...) que todavía no están implementados.
 
 ## Versión 2.0.0 (estable) — Bloque 2: Sincronización + Bloque 19/20: Editor visual de diálogos
 

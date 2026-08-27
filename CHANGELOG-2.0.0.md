@@ -1,6 +1,6 @@
-# Changelog — v2.0.0.x (versión mayor estable actual)
+# Changelog — v2.0.0 a v2.1.12 (segunda versión mayor estable y su serie 2.x.x completa)
 
-> Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
+> Detalle completo de cada cambio desde la v2.0.0 hasta la última versión de la serie 2.x.x (2.1.12), justo antes de pasar a 3.0.0. Este archivo queda congelado tal cual — las versiones nuevas van en su propio archivo (`CHANGELOG-3.0.0.md` en adelante). Ver `CHANGELOG.md` para el índice de todos los archivos.
 
 ## 2.1.12 — Carpetas de estilos/JS personalizables por separado en ui.frontend + explorador interno
 
