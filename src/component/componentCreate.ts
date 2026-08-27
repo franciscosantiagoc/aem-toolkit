@@ -5,7 +5,7 @@ import { findAemProjectForPath } from '../core/projectDetector';
 import { getConfig } from '../config';
 import { isValidJcrNodeName, scanComponentsFolder } from './componentDetector';
 import { buildComponentPanelInitialState, renderComponentPanelHtml } from './componentPanel';
-import { ComponentCreatePayload, computeDefaultAssetsDir, planComponentCreate, registerWebpackEntry, writePlan } from './componentGenerator';
+import { ComponentCreatePayload, computeAssetSubPaths, computeDefaultAssetsDir, planComponentCreate, registerWebpackEntry, writePlan } from './componentGenerator';
 import { openDialogEditor } from '../dialog/dialogPanel';
 
 function isValidStyleExt(v: unknown): v is 'css' | 'scss' | 'less' {
@@ -86,6 +86,15 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
       return;
     }
 
+    if (msg?.type === 'computeAssetPaths') {
+      const assetsDir = typeof msg.assetsDir === 'string' ? msg.assetsDir.trim() : '';
+      if (assetsDir) {
+        const { cssDir, jsDir } = computeAssetSubPaths(assetsDir, !!msg.useFrontend);
+        panel.webview.postMessage({ type: 'assetPaths', cssDir, jsDir });
+      }
+      return;
+    }
+
     if (msg?.type === 'browseFolder') {
       const current = typeof msg.current === 'string' ? msg.current : '';
       const anchor = current && fs.existsSync(current) ? current : componentsPath;
@@ -144,8 +153,16 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
 
       const relDir = path.relative(project.rootPath, plan.realComponentDir);
       let message = `Componente "${payload.name}" creado en "${relDir}".`;
-      const assetsRelDir = plan.classicClientlibDir ?? (plan.webpackAssets ? path.dirname(plan.webpackAssets.styleFile ?? plan.webpackAssets.jsFile ?? '') : undefined);
-      if (assetsRelDir) message += ` Estilos/JS en "${path.relative(project.rootPath, assetsRelDir)}".`;
+      if (plan.classicClientlibDir) {
+        const relClientlib = path.relative(project.rootPath, plan.classicClientlibDir);
+        const parts: string[] = [];
+        if (payload.generateStyles) parts.push(`CSS en "${path.join(relClientlib, 'css')}"`);
+        if (payload.generateJs) parts.push(`JS en "${path.join(relClientlib, 'js')}"`);
+        if (parts.length) message += ` ${parts.join(', ')}.`;
+      } else if (plan.webpackAssets && (plan.webpackAssets.styleFile || plan.webpackAssets.jsFile)) {
+        const assetsRelDir = path.dirname(plan.webpackAssets.styleFile ?? plan.webpackAssets.jsFile ?? '');
+        message += ` Estilos/JS en "${path.relative(project.rootPath, assetsRelDir)}".`;
+      }
       if (notes.length) message += ' ⚠ ' + notes.join(' ');
       vscode.window.showInformationMessage(message);
 

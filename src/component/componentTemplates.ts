@@ -72,8 +72,11 @@ export function clientlibContentXml(category: string, embedsCss: boolean, embeds
 `;
 }
 
-export function clientlibTxt(fileName: string): string {
-  return `#base=.\n${fileName}\n`;
+/** `css.txt`/`js.txt` de la clientlib clásica. `subfolder` es "css" o "js" — los archivos fuente ya
+ * NO viven sueltos en la raíz de la clientlib (para que no se aglomeren ahí si el usuario agrega más
+ * ficheros), sino en su propia subcarpeta, referenciada vía `#base=<subfolder>`. */
+export function clientlibTxt(subfolder: 'css' | 'js', fileName: string): string {
+  return `#base=${subfolder}\n${fileName}\n`;
 }
 
 export interface HtlMarkupOptions {

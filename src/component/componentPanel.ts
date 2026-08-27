@@ -109,12 +109,14 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   <div class="switch-desc" id="frontendDesc" style="display:none">Desactivado: se crea una clientlib clásica propia del componente en su lugar.</div>
 
   <div id="assetsDirBlock" style="display:none">
-    <label>Carpeta donde se generarán los estilos/JS</label>
+    <label>Carpeta base donde se generarán los estilos/JS</label>
     <div class="assets-dir-row">
       <input type="text" id="assetsDir" />
       <button type="button" class="secondary" id="browseAssetsDir">📁 Elegir...</button>
     </div>
-    <div class="switch-desc">Se precarga sola según nombre/versión y si usas el módulo frontend o una clientlib — puedes cambiarla a mano o con "Elegir...".</div>
+    <div class="switch-desc">Se precarga sola según nombre/versión y si usas el módulo frontend o una clientlib — puedes cambiarla a mano o con "Elegir...". Con clientlib clásica, CSS y JS se generan cada uno en su propia subcarpeta dentro de esta, para no aglomerarlos si luego agregas más ficheros.</div>
+    <div class="path-preview" id="cssDirPreview" style="display:none"></div>
+    <div class="path-preview" id="jsDirPreview" style="display:none"></div>
   </div>
 
   <details>
@@ -169,6 +171,8 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   const assetsDirBlock = document.getElementById('assetsDirBlock');
   const assetsDirInput = document.getElementById('assetsDir');
   const browseAssetsDirBtn = document.getElementById('browseAssetsDir');
+  const cssDirPreview = document.getElementById('cssDirPreview');
+  const jsDirPreview = document.getElementById('jsDirPreview');
   const createBtn = document.getElementById('createBtn');
   const statusText = document.getElementById('statusText');
 
@@ -254,6 +258,19 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     assetsDirBlock.style.display = show ? 'block' : 'none';
   }
 
+  function updateAssetPathPreviews() {
+    const dir = assetsDirInput.value.trim();
+    cssDirPreview.style.display = generateStylesInput.checked && dir ? 'block' : 'none';
+    jsDirPreview.style.display = generateJsInput.checked && dir ? 'block' : 'none';
+  }
+
+  function requestAssetPaths() {
+    const dir = assetsDirInput.value.trim();
+    if (!dir) { cssDirPreview.textContent = ''; jsDirPreview.textContent = ''; updateAssetPathPreviews(); return; }
+    const useFrontend = state.hasFrontendModule && addToFrontendInput.checked;
+    vscode.postMessage({ type: 'computeAssetPaths', assetsDir: dir, useFrontend: useFrontend });
+  }
+
   function requestDefaultAssetsDir() {
     const name = nameInput.value.trim();
     if (!name || !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) return;
@@ -279,13 +296,13 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     frontendRow.style.display = show ? 'flex' : 'none';
     frontendDesc.style.display = show ? 'block' : 'none';
   }
-  generateStylesInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); });
-  generateJsInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); });
-  addToFrontendInput.addEventListener('change', requestDefaultAssetsDir);
+  generateStylesInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); });
+  generateJsInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); requestAssetPaths(); });
+  addToFrontendInput.addEventListener('change', function () { requestDefaultAssetsDir(); requestAssetPaths(); });
   updateFrontendVisibility();
   updateAssetsDirVisibility();
 
-  assetsDirInput.addEventListener('input', function () { assetsDirInput.dataset.userEdited = '1'; });
+  assetsDirInput.addEventListener('input', function () { assetsDirInput.dataset.userEdited = '1'; requestAssetPaths(); });
   browseAssetsDirBtn.addEventListener('click', function () {
     vscode.postMessage({ type: 'browseFolder', current: assetsDirInput.value.trim() });
   });
@@ -338,10 +355,17 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     }
     if (msg.type === 'defaultAssetsDir') {
       if (!assetsDirInput.dataset.userEdited) assetsDirInput.value = msg.path;
+      requestAssetPaths();
     }
     if (msg.type === 'folderPicked') {
       assetsDirInput.value = msg.path;
       assetsDirInput.dataset.userEdited = '1';
+      requestAssetPaths();
+    }
+    if (msg.type === 'assetPaths') {
+      cssDirPreview.textContent = '📄 CSS: ' + msg.cssDir;
+      jsDirPreview.textContent = '📄 JS: ' + msg.jsDir;
+      updateAssetPathPreviews();
     }
   });
 

@@ -89,6 +89,24 @@ export function computeDefaultAssetsDir(
 }
 
 /**
+ * Rutas concretas donde terminan los archivos de CSS/JS a partir de la carpeta base (`assetsDir`,
+ * ya sea la calculada por `computeDefaultAssetsDir` o una elegida a mano por el usuario). Única
+ * fuente de verdad tanto para escribir los archivos de verdad (`planComponentCreate`) como para la
+ * vista previa del formulario (`componentCreate.ts` responde al mensaje `computeAssetPaths` con
+ * esto), para que nunca queden desincronizadas.
+ *
+ * Con `ui.frontend`, CSS y JS van juntos en la misma carpeta del componente (convención webpack ya
+ * existente — no es una clientlib, no hay problema de aglomeración de archivos de otro tipo). Con
+ * clientlib clásica, cada uno va en su propia subcarpeta (`css/`, `js/`) dentro de la carpeta base,
+ * a pedido explícito, para que no se aglomeren archivos de distinto tipo en la raíz de la clientlib
+ * y el usuario pueda seguir agregando más ficheros ahí sin ensuciarla.
+ */
+export function computeAssetSubPaths(assetsDir: string, useFrontend: boolean): { cssDir: string; jsDir: string } {
+  if (useFrontend) return { cssDir: assetsDir, jsDir: assetsDir };
+  return { cssDir: path.join(assetsDir, 'css'), jsDir: path.join(assetsDir, 'js') };
+}
+
+/**
  * Calcula el plan completo de creación (rutas + contenido de cada archivo) sin tocar el disco
  * todavía — separado de la escritura real para poder mostrar una vista previa y para poder testear
  * la lógica sin filesystem real.
@@ -151,6 +169,7 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
   let classicClientlibDir: string | undefined;
   if (useClassicClientlib) {
     classicClientlibDir = assetsDir;
+    const { cssDir: cssSubDir, jsDir: jsSubDir } = computeAssetSubPaths(assetsDir, false);
     const cssFileName = `${name}.${payload.styleExt}`;
     const jsFileName = `${name}.js`;
     files.push({
@@ -158,25 +177,26 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
       content: clientlibContentXml(clientlibCategory, payload.generateStyles, payload.generateJs)
     });
     if (payload.generateStyles) {
-      files.push({ absPath: path.join(classicClientlibDir, 'css.txt'), content: clientlibTxt(cssFileName) });
-      files.push({ absPath: path.join(classicClientlibDir, cssFileName), content: starterStyleContent(name, payload.styleExt) });
+      files.push({ absPath: path.join(classicClientlibDir, 'css.txt'), content: clientlibTxt('css', cssFileName) });
+      files.push({ absPath: path.join(cssSubDir, cssFileName), content: starterStyleContent(name, payload.styleExt) });
     }
     if (payload.generateJs) {
-      files.push({ absPath: path.join(classicClientlibDir, 'js.txt'), content: clientlibTxt(jsFileName) });
-      files.push({ absPath: path.join(classicClientlibDir, jsFileName), content: starterJsContent(name) });
+      files.push({ absPath: path.join(classicClientlibDir, 'js.txt'), content: clientlibTxt('js', jsFileName) });
+      files.push({ absPath: path.join(jsSubDir, jsFileName), content: starterJsContent(name) });
     }
   }
 
   let webpackAssets: ComponentCreatePlan['webpackAssets'];
   if (useFrontend) {
+    const { cssDir, jsDir } = computeAssetSubPaths(assetsDir, true); // ambas === assetsDir en este modo
     let styleFile: string | undefined;
     let jsFile: string | undefined;
     if (payload.generateStyles) {
-      styleFile = path.join(assetsDir, `_${name}.${payload.styleExt}`);
+      styleFile = path.join(cssDir, `_${name}.${payload.styleExt}`);
       files.push({ absPath: styleFile, content: starterStyleContent(name, payload.styleExt) });
     }
     if (payload.generateJs) {
-      jsFile = path.join(assetsDir, `${name}.js`);
+      jsFile = path.join(jsDir, `${name}.js`);
       files.push({ absPath: jsFile, content: starterJsContent(name) });
     }
     webpackAssets = { styleFile, jsFile };

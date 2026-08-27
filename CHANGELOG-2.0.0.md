@@ -2,6 +2,12 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.5 — CSS/JS de la clientlib clásica en su propia subcarpeta + vista previa de las 2 rutas
+
+- **A pedido explícito**: el CSS y el JS de una clientlib clásica ya no quedan sueltos junto al `.content.xml` de la clientlib — cada uno va ahora en su propia subcarpeta (`css/`, `js/`) dentro de ella, referenciadas desde `css.txt`/`js.txt` con `#base=css`/`#base=js`. Así la raíz de la clientlib no se aglomera si el usuario necesita agregar más ficheros de estilos o JS más adelante. No afecta a `ui.frontend`: ahí CSS y JS siguen yendo juntos en la carpeta del componente, como ya era la convención webpack del proyecto.
+- **Vista previa de 2 rutas en el formulario**: debajo de la carpeta base de estilos/JS ahora se muestran, solo si aplica, "📄 CSS: ..." y "📄 JS: ..." con la ruta final exacta de cada uno (cada línea visible solo si su switch — estilos / JS — está activo). Se muestran ambas incluso cuando coinciden (caso `ui.frontend`), para que el usuario tenga siempre el contexto claro de dónde termina cada tipo de archivo. Se recalculan en vivo con cada cambio, con la misma función (`computeAssetSubPaths`) que usa la creación real, para que la vista previa nunca quede desincronizada de lo que se escribe de verdad.
+- El mensaje de confirmación tras crear el componente ahora detalla por separado dónde quedó el CSS y dónde el JS (en vez de un único directorio genérico de "estilos/JS").
+
 ## 2.1.4 — Ubicación de la clientlib clásica ajustada a la convención de proyecto
 
 - **Bug de convención corregido, a pedido explícito**: la clientlib clásica de un componente (cuando no se usa `ui.frontend`) se creaba anidada dentro de la propia carpeta del componente (ej. `components/app-banner/clientlibs/app-banner`). Ahora se crea a nivel del namespace, hermana de `components`, dentro de una carpeta contenedora `clientlibs/clientlib-components/` (ej. `apps/<namespace>/clientlibs/clientlib-components/app-banner`).
