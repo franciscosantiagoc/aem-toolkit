@@ -6,7 +6,7 @@ import { getConfig } from '../config';
 import { isValidJcrNodeName, scanComponentsFolder } from './componentDetector';
 import { buildComponentPanelInitialState, renderComponentPanelHtml } from './componentPanel';
 import { ComponentCreatePayload, computeAssetSubPaths, computeDefaultAssetsDir, planComponentCreate, registerWebpackEntry, writePlan } from './componentGenerator';
-import { isAlreadyVersionedComponent, migrateComponentToVariant } from './componentVariant';
+import { createNextVersion, getLatestVersionNumber, isAlreadyVersionedComponent, migrateComponentToVariant } from './componentVariant';
 import { openDialogEditor } from '../dialog/dialogPanel';
 
 function isValidStyleExt(v: unknown): v is 'css' | 'scss' | 'less' {
@@ -50,9 +50,11 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
   }
 
   // Si la carpeta sobre la que se hizo clic ya ES un componente (tiene su propio .content.xml):
-  // - Si ya está versionado (tiene subcarpetas v1/v2... con su propio .content.xml), es un proxy —
-  //   no tiene sentido ofrecer "Crear nuevo" ahí; se redirige al flujo que ya funciona (mismo nombre,
-  //   con "Componente versionado" activado, la extensión calcula sola la siguiente versión).
+  // - Si ya está versionado (tiene subcarpetas v1/v2... con su propio .content.xml), es un proxy: se
+  //   ofrece crear directamente la siguiente versión (vN+1, duplicando tal cual la más alta existente
+  //   como punto de partida) — ver `createNextVersion` (componentVariant.ts). Antes esto solo avisaba
+  //   y redirigía al formulario; a pedido explícito (v2.1.11) se resuelve directo, sin formulario,
+  //   igual que el caso de abajo.
   // - Si NO está versionado todavía (es un componente real sin versión, con su contenido directo en
   //   la carpeta), se ofrece convertirlo en una variante: el contenido actual pasa a v1, se duplica a
   //   v2, y la carpeta pasa a ser el proxy apuntando a v2 (ver componentVariant.ts).
@@ -61,9 +63,38 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
       const componentName = path.basename(target.fsPath);
 
       if (isAlreadyVersionedComponent(target.fsPath)) {
-        vscode.window.showWarningMessage(
-          `"${componentName}" ya es un componente versionado (proxy). Para agregar una versión nueva, usa "Crear nuevo... → Componente" sobre "components" (o cualquier otra carpeta de ui.apps) con el mismo nombre "${componentName}" y "Componente versionado" activado; la extensión calcula sola la siguiente versión.`
+        const latestVersion = getLatestVersionNumber(target.fsPath);
+        const nextVersionLabel = latestVersion !== undefined ? `"v${latestVersion + 1}"` : 'la versión nueva';
+        const fromLabel = latestVersion !== undefined ? ` a partir de "v${latestVersion}"` : '';
+
+        const versionChoice = await vscode.window.showWarningMessage(
+          `"${componentName}" ya es un componente versionado (proxy). ¿Deseas crear ${nextVersionLabel}${fromLabel}? Su contenido se duplicará tal cual como punto de partida, y el proxy pasará a apuntar a esa versión nueva.`,
+          { modal: true },
+          'Crear versión'
         );
+        if (versionChoice !== 'Crear versión') return;
+
+        try {
+          const result = createNextVersion(target.fsPath, project.namespace ?? '<namespace>');
+          const relNew = path.relative(project.rootPath, result.newVersionDir);
+          vscode.window.showInformationMessage(
+            `"${result.componentName}" tiene una versión nueva: "v${result.newVersionNumber}" ("${relNew}"), creada a partir de "v${result.previousVersionNumber}". El proxy ya apunta a "v${result.newVersionNumber}".`
+          );
+
+          // Abre el HTML y el diálogo de la versión nueva (si existen) — mismo criterio de apertura
+          // automática que el resto de flujos de creación (ver v2.1.7/v2.1.8 y "Crear variante").
+          const htmlPath = path.join(result.newVersionDir, `${result.componentName}.html`);
+          if (fs.existsSync(htmlPath)) {
+            await vscode.window.showTextDocument(vscode.Uri.file(htmlPath), { preview: false });
+          }
+          const dialogXmlPath = path.join(result.newVersionDir, '_cq_dialog', '.content.xml');
+          if (fs.existsSync(dialogXmlPath)) {
+            await openDialogEditor(context, vscode.Uri.file(dialogXmlPath));
+          }
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          vscode.window.showErrorMessage(`No se pudo crear la versión nueva de "${componentName}": ${detail}`);
+        }
         return;
       }
 

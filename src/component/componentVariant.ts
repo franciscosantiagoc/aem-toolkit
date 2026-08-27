@@ -14,6 +14,18 @@ export interface VariantMigrationResult {
   componentGroup: string;
 }
 
+export interface NextVersionResult {
+  componentName: string;
+  /** `.content.xml` del proxy (la carpeta sobre la que se hizo clic), reescrito para apuntar a la versión nueva. */
+  proxyContentXmlPath: string;
+  previousVersionDir: string;
+  previousVersionNumber: number;
+  newVersionDir: string;
+  newVersionNumber: number;
+  title: string;
+  componentGroup: string;
+}
+
 function readStringProp(node: DocViewNode, name: string): string | undefined {
   return node.properties.find((p) => p.name === name)?.values[0];
 }
@@ -45,6 +57,29 @@ function copyDirRecursive(src: string, dest: string): void {
   }
 }
 
+/** Subcarpetas `vN` de `componentDir` que además tienen su propio `.content.xml` real (o sea, son
+ * versiones de verdad y no una carpeta `vN` vacía/a medio crear). Base compartida por
+ * `isAlreadyVersionedComponent` (¿hay alguna?) y `createNextVersion` (¿cuál es la más alta?). */
+function listVersionDirs(componentDir: string): { version: number; dir: string }[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(componentDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const result: { version: number; dir: string }[] = [];
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const version = isVersionFolderName(e.name);
+    if (version === undefined) continue;
+    const dir = path.join(componentDir, e.name);
+    if (fs.existsSync(path.join(dir, '.content.xml'))) {
+      result.push({ version, dir });
+    }
+  }
+  return result;
+}
+
 /**
  * true si `componentDir` ya es un componente **versionado** (proxy): tiene su propio `.content.xml`
  * Y además al menos una subcarpeta `vN` con su propio `.content.xml` real. Si tiene `.content.xml`
@@ -52,13 +87,16 @@ function copyDirRecursive(src: string, dest: string): void {
  * `migrateComponentToVariant` sabe convertir.
  */
 export function isAlreadyVersionedComponent(componentDir: string): boolean {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(componentDir, { withFileTypes: true });
-  } catch {
-    return false;
-  }
-  return entries.some((e) => e.isDirectory() && isVersionFolderName(e.name) !== undefined && fs.existsSync(path.join(componentDir, e.name, '.content.xml')));
+  return listVersionDirs(componentDir).length > 0;
+}
+
+/** Número de la versión más alta ya creada (con `.content.xml` propio), o undefined si no hay
+ * ninguna todavía — usado para armar el mensaje de confirmación de `createNextVersion` antes de
+ * ejecutarla (para poder mostrar "v3 a partir de v2" en vez de un genérico "una versión nueva"). */
+export function getLatestVersionNumber(componentDir: string): number | undefined {
+  const versions = listVersionDirs(componentDir);
+  if (versions.length === 0) return undefined;
+  return Math.max(...versions.map((v) => v.version));
 }
 
 /**
@@ -115,4 +153,62 @@ export function migrateComponentToVariant(componentDir: string, namespace: strin
   fs.writeFileSync(contentXmlPath, serializeDocView(tree, namespaces), 'utf8');
 
   return { componentName, proxyContentXmlPath: contentXmlPath, v1Dir, v2Dir, title, componentGroup };
+}
+
+/**
+ * Crea la siguiente versión (`vN+1`) de un componente que **ya** es un proxy versionado (tiene al
+ * menos una subcarpeta `vN` con su propio `.content.xml` — ver `isAlreadyVersionedComponent`), a
+ * pedido explícito del usuario al usar "Crear componente" directamente sobre la carpeta del proxy:
+ * antes esto solo mostraba un aviso pidiendo ir a `components` a repetir el flujo del formulario; con
+ * esta función se resuelve directo, sin formulario, igual que ya hace `migrateComponentToVariant`
+ * para el caso de un componente sin versionar.
+ *
+ * 1. Se ubica la versión más alta ya existente (`vN`, la que tiene mayor número entre las que
+ *    cumplen `listVersionDirs`) y se **duplica tal cual** para crear `vN+1` — mismo criterio que
+ *    `migrateComponentToVariant` usa para `v1` → `v2`: el usuario arranca la versión nueva con el
+ *    contenido real de la anterior (HTL, diálogo, `_cq_editConfig`/`_cq_design_dialog`/`_cq_template`
+ *    si los tuviera) en vez de una plantilla vacía, y la ajusta a mano desde ahí. La clientlib clásica
+ *    (si la hay) vive fuera de `components` — es compartida entre versiones por convención de la
+ *    extensión (ver `computeDefaultAssetsDir`) — así que no hace falta tocarla ni duplicarla aparte.
+ * 2. El proxy (el `.content.xml` de `componentDir`, SIN mover ni recrear) se reescribe únicamente en
+ *    `sling:resourceSuperType`, que pasa a apuntar a `vN+1` — el resto de sus propiedades (título,
+ *    grupo, ícono, `allowedParents`...) quedan intactas, igual que en `migrateComponentToVariant`.
+ *
+ * No requiere ningún dato del formulario (nombre/título/grupo/estilos...) porque no crea un
+ * componente nuevo de cero — parte enteramente del contenido ya existente de la versión anterior.
+ */
+export function createNextVersion(componentDir: string, namespace: string): NextVersionResult {
+  const componentName = path.basename(componentDir);
+  const versions = listVersionDirs(componentDir);
+  if (versions.length === 0) {
+    throw new Error(`"${componentName}" no tiene ninguna subcarpeta de versión (v1, v2...) con su propio .content.xml.`);
+  }
+  const latest = versions.reduce((a, b) => (b.version > a.version ? b : a));
+  const newVersionNumber = latest.version + 1;
+  const newVersionDir = path.join(componentDir, `v${newVersionNumber}`);
+
+  // 1. Duplicar tal cual la versión más alta -> la nueva.
+  copyDirRecursive(latest.dir, newVersionDir);
+
+  // 2. El proxy (mismo .content.xml, resto de propiedades intactas) pasa a apuntar a la versión nueva.
+  const contentXmlPath = path.join(componentDir, '.content.xml');
+  const originalXml = fs.readFileSync(contentXmlPath, 'utf8');
+  const namespaces = mergeNamespaces(extractRootNamespaces(originalXml));
+  const tree = parseDocView(originalXml);
+  const title = readStringProp(tree, 'jcr:title') ?? componentName;
+  const componentGroup = readStringProp(tree, 'componentGroup') ?? '';
+
+  setStringProp(tree, 'sling:resourceSuperType', `${namespace}/components/${componentName}/v${newVersionNumber}`);
+  fs.writeFileSync(contentXmlPath, serializeDocView(tree, namespaces), 'utf8');
+
+  return {
+    componentName,
+    proxyContentXmlPath: contentXmlPath,
+    previousVersionDir: latest.dir,
+    previousVersionNumber: latest.version,
+    newVersionDir,
+    newVersionNumber,
+    title,
+    componentGroup
+  };
 }

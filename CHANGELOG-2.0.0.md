@@ -2,6 +2,13 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.11 — Crear la siguiente versión directamente al hacer clic sobre un componente ya versionado
+
+- **A pedido explícito, cierra un pendiente que había quedado abierto en la v2.1.10**: al hacer clic derecho con "Crear componente" directamente sobre la carpeta de un componente **ya versionado** (proxy con subcarpetas `vN`), antes se mostraba solo un aviso pidiendo repetir el flujo desde `components` con el mismo nombre. Ahora se pregunta directo con un modal ("¿Deseas crear 'vN+1' a partir de 'vN'?", mostrando los números reales) y, al confirmar, se crea la versión nueva sin pasar por el formulario.
+- La versión más alta ya existente se **duplica tal cual** para crear la nueva (mismo criterio que "Crear variante" usa para v1→v2) — el usuario arranca con el contenido real de la versión anterior en vez de una plantilla vacía. El proxy se reescribe únicamente en `sling:resourceSuperType` (el resto de sus propiedades — título, grupo, ícono, `allowedParents`... — quedan intactas) para apuntar a la versión nueva.
+- Se auto-abren el `.html` y el diálogo de la versión nueva, igual que en el resto de flujos de creación. Si se cancela el modal, no se toca nada en disco.
+- Nuevas funciones en `componentVariant.ts`: `createNextVersion`, `getLatestVersionNumber`.
+
 ## 2.1.10 — Convertir un componente sin versionar en variante
 
 - **A pedido explícito, cierra un pendiente de la v2.1.2**: al hacer clic derecho con "Crear componente" directamente sobre la carpeta de un componente **ya existente pero sin versionar** (tiene su propio `.content.xml` y su contenido real directo adentro, sin subcarpetas `v1`/`v2`), ahora se pregunta con un modal si se quiere crear una variante (versión nueva) en vez de solo avisar que la carpeta ya contiene un componente.
