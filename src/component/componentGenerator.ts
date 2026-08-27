@@ -62,24 +62,30 @@ export interface ComponentCreatePlan {
 
 /**
  * Carpeta por defecto donde van los estilos/JS de un componente, según si van a `ui.frontend`
- * (webpack) o a una clientlib clásica propia dentro del componente. Única fuente de verdad tanto
- * para la vista previa en vivo del formulario (`componentCreate.ts` responde a
- * `computeDefaultAssetsDir` con esto) como para el plan real de creación, para que nunca queden
- * desincronizados.
+ * (webpack) o a una clientlib clásica propia. Única fuente de verdad tanto para la vista previa en
+ * vivo del formulario (`componentCreate.ts` responde a `computeDefaultAssetsDir` con esto) como para
+ * el plan real de creación, para que nunca queden desincronizados.
+ *
+ * `versionNumber` se conserva en la firma para versiones futuras (ej. si algún proyecto quisiera
+ * clientlibs aisladas por versión) pero no se usa todavía: la clientlib clásica de un componente
+ * versionado es una sola, compartida entre sus versiones (misma categoría `<namespace>.<nombre>`),
+ * consistente con que solo una versión está "activa" a la vez vía el proxy.
  */
 export function computeDefaultAssetsDir(
   project: AemProjectInfo,
   name: string,
   useFrontend: boolean,
-  versionNumber: number | undefined
+  _versionNumber: number | undefined
 ): string {
   if (useFrontend) {
     return path.join(project.rootPath, 'ui.frontend', 'src', 'main', 'webpack', 'components', name);
   }
-  const componentsPath = project.componentsPath!;
-  const baseDir = path.join(componentsPath, name);
-  const realComponentDir = versionNumber !== undefined ? path.join(baseDir, `v${versionNumber}`) : baseDir;
-  return path.join(realComponentDir, 'clientlibs', name);
+  // Convención confirmada: NO se anida dentro de la carpeta del componente — se centraliza a nivel
+  // del namespace, en una carpeta contenedora "clientlib-components" (sin .content.xml propio, solo
+  // agrupa) hermana de "components", con una subcarpeta-clientlib real e independiente por
+  // componente (su propia categoría `<namespace>.<nombre>`).
+  const namespaceRoot = path.dirname(project.componentsPath!); // .../apps/<namespace>
+  return path.join(namespaceRoot, 'clientlibs', 'clientlib-components', name);
 }
 
 /**

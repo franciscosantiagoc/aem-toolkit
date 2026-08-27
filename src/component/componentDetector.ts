@@ -74,7 +74,10 @@ function scanExistingComponents(componentsPath: string, utilsFolderName: string)
 
 /** Extensión de estilos (css/scss/less) de cada archivo encontrado, recorriendo tanto los
  * componentes ya creados en `ui.frontend/src/main/webpack/components` (si hay frontend) como los
- * clientlibs clásicos dentro de cada carpeta de componente en `ui.apps`. */
+ * clientlibs clásicos en `ui.apps` — tanto las que puedan quedar (de versiones previas de la
+ * extensión, o creadas a mano) anidadas dentro de la carpeta de cada componente, como la ubicación
+ * compartida actual `apps/<namespace>/clientlibs/clientlib-components/<nombre>` (hermana de
+ * `components`). */
 function detectStyleExtensions(componentsPath: string, hasFrontendModule: boolean, rootPath: string): StyleExt[] {
   const found = new Set<StyleExt>();
   const STYLE_EXTS: StyleExt[] = ['scss', 'less', 'css'];
@@ -107,6 +110,8 @@ function detectStyleExtensions(componentsPath: string, hasFrontendModule: boolea
     scanDirRecursive(path.join(rootPath, 'ui.frontend', 'src', 'main', 'webpack', 'components'), 0);
   }
   scanDirRecursive(componentsPath, 0);
+  // Ubicación compartida de clientlibs clásicos, hermana de "components" (apps/<namespace>/clientlibs).
+  scanDirRecursive(path.join(path.dirname(componentsPath), 'clientlibs'), 0);
 
   return STYLE_EXTS.filter((e) => found.has(e));
 }

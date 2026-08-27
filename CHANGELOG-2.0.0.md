@@ -2,6 +2,13 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.4 — Ubicación de la clientlib clásica ajustada a la convención de proyecto
+
+- **Bug de convención corregido, a pedido explícito**: la clientlib clásica de un componente (cuando no se usa `ui.frontend`) se creaba anidada dentro de la propia carpeta del componente (ej. `components/app-banner/clientlibs/app-banner`). Ahora se crea a nivel del namespace, hermana de `components`, dentro de una carpeta contenedora `clientlibs/clientlib-components/` (ej. `apps/<namespace>/clientlibs/clientlib-components/app-banner`).
+- La carpeta contenedora `clientlib-components` **no tiene `.content.xml` propio** — es solo un agrupador y se crea sola al escribir el primer archivo dentro. Cada componente conserva **su propia clientlib independiente** (con su propia categoría `<namespace>.<nombre>`) dentro de esa carpeta, no una única clientlib compartida por todos los componentes. Un componente versionado sigue usando una sola clientlib compartida entre sus versiones (no una por versión).
+- La detección de extensión de estilos dominante/mixta (`detectStyleExtensions`) ahora también escanea esta carpeta compartida, para no perder precisión al detectar estilos ya existentes de componentes creados con esta nueva ubicación.
+- Sin cambios para quien ya usa `ui.frontend`/webpack (ese camino no se toca) ni para la carpeta personalizada elegida a mano (punto 7bis del formulario, v2.1.3) — solo cambia el valor por defecto cuando se usa clientlib clásica.
+
 ## 2.1.3 — Fix del embed de clientlib + carpeta de estilos/JS personalizable
 
 - **Bug corregido**: con `ui.frontend` activo, el HTL generado embebía igual un `data-sly-call` hacia una categoría de clientlib que nunca se creaba (porque con webpack los estilos/JS se compilan junto con el resto del sitio, no como una clientlib propia del componente). Ahora ese embed solo se genera cuando de verdad se creó una clientlib clásica; con `ui.frontend` deja un comentario explicativo en su lugar.
