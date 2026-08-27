@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AemProjectInfo } from '../core/projectDetector';
 import { buildEmptyDialogXml } from '../dialog/dialogPanel';
+import { reformatXml } from '../dialog/docviewSerializer';
 import { StyleExt } from './componentDetector';
 import {
   clientlibContentXml,
@@ -243,11 +244,25 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
     webpackAssets = { styleFile, jsFile };
   }
 
+  // Todo `.xml` generado (proxy, componente, diálogos, editConfig, template, clientlib) se reformatea
+  // con el mismo estilo que usa "AEM: Formatear XML" (`reformatXml`, `docviewSerializer.ts`) antes de
+  // escribirse — a pedido explícito, para que ya salga formateado en vez de con el string crudo de
+  // cada plantilla. Si algún archivo no fuera XML de Document View válido, se deja tal cual en vez de
+  // romper la creación del componente por un problema de formato.
+  const formattedFiles = files.map((file) => {
+    if (!file.absPath.toLowerCase().endsWith('.xml')) return file;
+    try {
+      return { absPath: file.absPath, content: reformatXml(file.content) };
+    } catch {
+      return file;
+    }
+  });
+
   return {
     realComponentDir,
     resourceTypePath,
     versionNumber: nextVersion,
-    files,
+    files: formattedFiles,
     classicClientlibDir,
     classicAssets,
     webpackAssets,

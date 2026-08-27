@@ -1,4 +1,4 @@
-import { DocViewNode, DocViewProperty } from '../sync/docview';
+import { DocViewNode, DocViewProperty, extractRootNamespaces, parseDocView } from '../sync/docview';
 
 /**
  * Inverso de `docview.ts#parseDocView`: convierte un árbol `DocViewNode` de vuelta a texto XML
@@ -103,4 +103,18 @@ function serializeNode(node: DocViewNode, depth: number, extraNamespaces: [strin
 export function serializeDocView(root: DocViewNode, namespaces: [string, string][] = STANDARD_NAMESPACES): string {
   const body = serializeNode(root, 0, namespaces);
   return `<?xml version="1.0" encoding="UTF-8"?>\n${body}\n`;
+}
+
+/**
+ * Reformatea un XML completo con el mismo estilo de este módulo: lo parsea como FileVault Document
+ * View y lo vuelve a serializar. Es la misma operación que hace el comando "AEM: Formatear XML"
+ * (`formatXmlCommand.ts`) — se expone acá para que cualquier otro punto de la extensión (desde
+ * v2.1.9, la creación de componentes) pueda reformatear un XML recién generado sin duplicar esta
+ * lógica. Preserva namespaces adicionales que el XML de entrada ya declarara (`extractRootNamespaces`
+ * + `mergeNamespaces`), no solo las 4 estándar.
+ */
+export function reformatXml(xml: string): string {
+  const tree = parseDocView(xml);
+  const namespaces = mergeNamespaces(extractRootNamespaces(xml));
+  return serializeDocView(tree, namespaces);
 }

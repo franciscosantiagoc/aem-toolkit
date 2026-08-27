@@ -2,6 +2,12 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.9 — Todo el XML del componente se genera ya formateado
+
+- **A pedido explícito**: los `.xml` que se generan al crear un componente (`.content.xml` del componente y del proxy, `_cq_dialog`, `_cq_editConfig.xml`, `_cq_design_dialog`, `_cq_template`, y el `.content.xml` de la clientlib clásica) ya no quedan con el string literal crudo de cada plantilla — se reformatean con el mismo estilo que usa "AEM: Formatear XML" antes de escribirse (abertura + primer atributo en la primera línea, atributos adicionales uno por línea, cierre siempre en su propia línea, sin autocierres).
+- Se extrajo `reformatXml` como función compartida en `docviewSerializer.ts` (parsear + fusionar namespaces + reserializar en un solo paso) para no duplicar esta lógica entre el comando "AEM: Formatear XML" y la creación de componentes — ambos la reusan ahora.
+- Si algún XML generado no fuera Document View válido por algún motivo, se deja tal cual en vez de romper la creación del componente.
+
 ## 2.1.8 — El editor visual de diálogos también abre el XML crudo
 
 - **A pedido explícito**: al abrir el editor visual de un diálogo (`openDialogEditor`, compartida por el comando "AEM: Editar diálogo...", "AEM: Diálogo" y la apertura automática al crear un componente), ahora también se abre el `_cq_dialog/.content.xml` crudo como pestaña de texto normal — antes solo se abría el formulario visual. El editor visual queda como pestaña activa al terminar (sigue siendo la forma principal de trabajar el diálogo), pero el XML queda disponible como otra pestaña para quien prefiera mirarlo o editarlo directamente.

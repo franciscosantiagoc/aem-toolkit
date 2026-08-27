@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { parseDocView, extractRootNamespaces } from '../sync/docview';
-import { serializeDocView, mergeNamespaces } from '../dialog/docviewSerializer';
+import { reformatXml } from '../dialog/docviewSerializer';
 
 /**
  * Comando "AEM: Formatear XML" — reformatea cualquier `.xml` de FileVault Document View (no solo
@@ -36,9 +35,7 @@ export async function formatXmlFiles(candidates: vscode.Uri[]): Promise<void> {
   for (const target of targets) {
     try {
       const original = fs.readFileSync(target.fsPath, 'utf8');
-      const tree = parseDocView(original);
-      const namespaces = mergeNamespaces(extractRootNamespaces(original));
-      const formatted = serializeDocView(tree, namespaces);
+      const formatted = reformatXml(original);
       if (formatted !== original) {
         fs.writeFileSync(target.fsPath, formatted, 'utf8');
         changedCount += 1;
