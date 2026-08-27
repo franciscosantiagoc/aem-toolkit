@@ -62,6 +62,10 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   .status.success { color: var(--vscode-testing-iconPassed, #3fb950); font-weight: 600; }
   .field-error { color: var(--vscode-errorForeground, #f14c4c); font-size: 11px; margin-top: 3px; display:none; }
   .field-error.visible { display:block; }
+  .assets-dir-row { display:flex; gap:6px; align-items:center; }
+  .assets-dir-row input { flex:1; margin:0; }
+  button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); white-space: nowrap; }
+  button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
 </style>
 </head>
 <body>
@@ -103,6 +107,15 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     <span class="switch-label">Añadir al módulo frontend (ui.frontend)</span>
   </div>
   <div class="switch-desc" id="frontendDesc" style="display:none">Desactivado: se crea una clientlib clásica propia del componente en su lugar.</div>
+
+  <div id="assetsDirBlock" style="display:none">
+    <label>Carpeta donde se generarán los estilos/JS</label>
+    <div class="assets-dir-row">
+      <input type="text" id="assetsDir" />
+      <button type="button" class="secondary" id="browseAssetsDir">📁 Elegir...</button>
+    </div>
+    <div class="switch-desc">Se precarga sola según nombre/versión y si usas el módulo frontend o una clientlib — puedes cambiarla a mano o con "Elegir...".</div>
+  </div>
 
   <details>
     <summary>Opciones avanzadas</summary>
@@ -153,6 +166,9 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
   const frontendRow = document.getElementById('frontendRow');
   const frontendDesc = document.getElementById('frontendDesc');
   const addToFrontendInput = document.getElementById('addToFrontend');
+  const assetsDirBlock = document.getElementById('assetsDirBlock');
+  const assetsDirInput = document.getElementById('assetsDir');
+  const browseAssetsDirBtn = document.getElementById('browseAssetsDir');
   const createBtn = document.getElementById('createBtn');
   const statusText = document.getElementById('statusText');
 
@@ -233,8 +249,29 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     if (!titleInput.dataset.userEdited) titleInput.value = titleFromName(name);
   }
 
-  nameInput.addEventListener('input', updatePreview);
-  versionedInput.addEventListener('change', updatePreview);
+  function updateAssetsDirVisibility() {
+    const show = generateStylesInput.checked || generateJsInput.checked;
+    assetsDirBlock.style.display = show ? 'block' : 'none';
+  }
+
+  function requestDefaultAssetsDir() {
+    const name = nameInput.value.trim();
+    if (!name || !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) return;
+    if (assetsDirInput.dataset.userEdited) return;
+    if (!generateStylesInput.checked && !generateJsInput.checked) return;
+    const versioned = versionedInput.checked;
+    const conflictInfo = computeConflict(name, versioned);
+    const useFrontend = state.hasFrontendModule && addToFrontendInput.checked;
+    vscode.postMessage({
+      type: 'computeDefaultAssetsDir',
+      name: name,
+      useFrontend: useFrontend,
+      versionNumber: conflictInfo.nextVersion
+    });
+  }
+
+  nameInput.addEventListener('input', function () { updatePreview(); requestDefaultAssetsDir(); });
+  versionedInput.addEventListener('change', function () { updatePreview(); requestDefaultAssetsDir(); });
   titleInput.addEventListener('input', function () { titleInput.dataset.userEdited = '1'; });
 
   function updateFrontendVisibility() {
@@ -242,9 +279,16 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     frontendRow.style.display = show ? 'flex' : 'none';
     frontendDesc.style.display = show ? 'block' : 'none';
   }
-  generateStylesInput.addEventListener('change', updateFrontendVisibility);
-  generateJsInput.addEventListener('change', updateFrontendVisibility);
+  generateStylesInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); });
+  generateJsInput.addEventListener('change', function () { updateFrontendVisibility(); updateAssetsDirVisibility(); requestDefaultAssetsDir(); });
+  addToFrontendInput.addEventListener('change', requestDefaultAssetsDir);
   updateFrontendVisibility();
+  updateAssetsDirVisibility();
+
+  assetsDirInput.addEventListener('input', function () { assetsDirInput.dataset.userEdited = '1'; });
+  browseAssetsDirBtn.addEventListener('click', function () {
+    vscode.postMessage({ type: 'browseFolder', current: assetsDirInput.value.trim() });
+  });
 
   createBtn.addEventListener('click', function () {
     const name = nameInput.value.trim();
@@ -268,6 +312,7 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
         styleExt: styleExtSelect.value,
         generateJs: generateJsInput.checked,
         addToFrontend: state.hasFrontendModule ? addToFrontendInput.checked : false,
+        assetsDir: (generateStylesInput.checked || generateJsInput.checked) ? (assetsDirInput.value.trim() || undefined) : undefined,
         advanced: {
           editConfig: document.getElementById('advEditConfig').checked,
           designDialog: document.getElementById('advDesignDialog').checked,
@@ -290,6 +335,13 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
         statusText.className = 'status error';
         createBtn.disabled = false;
       }
+    }
+    if (msg.type === 'defaultAssetsDir') {
+      if (!assetsDirInput.dataset.userEdited) assetsDirInput.value = msg.path;
+    }
+    if (msg.type === 'folderPicked') {
+      assetsDirInput.value = msg.path;
+      assetsDirInput.dataset.userEdited = '1';
     }
   });
 

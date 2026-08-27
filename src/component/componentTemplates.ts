@@ -78,21 +78,28 @@ export function clientlibTxt(fileName: string): string {
 
 export interface HtlMarkupOptions {
   name: string;
-  clientlibCategory: string | undefined;
-  embedsCss: boolean;
-  embedsJs: boolean;
-  includePlaceholder: boolean;
   title: string;
+  includePlaceholder: boolean;
+  /** Presente SOLO cuando se creó una clientlib clásica propia del componente (con esa categoría
+   * real) — nunca cuando los estilos/JS van a `ui.frontend`, porque ahí no existe una categoría de
+   * clientlib propia del componente que referenciar (ver `frontendBundled`). */
+  clientlib: { category: string; embedsCss: boolean; embedsJs: boolean } | undefined;
+  /** true si los estilos/JS de este componente se generaron en `ui.frontend` (se compilan con el
+   * resto del sitio vía webpack) — deja solo un comentario informativo en vez de un embed, porque no
+   * hay ninguna categoría de clientlib por-componente que cargar desde el propio HTL. */
+  frontendBundled: boolean;
 }
 
 /** HTL de arranque del componente: clase raíz BEM, placeholder de autoría opcional (visible solo en
  * modo edición, vía el template `wcmmode.html` de AEM Core Components), y el embed inline de la
- * clientlib del componente (patrón `clientlib.html` de AEM Core Components), si corresponde. */
+ * clientlib del componente (patrón `clientlib.html` de AEM Core Components) — solo cuando esa
+ * clientlib realmente se creó (ver `clientlib`/`frontendBundled` arriba). */
 export function htlMarkup(opts: HtlMarkupOptions): string {
-  const { name, clientlibCategory, embedsCss, embedsJs, includePlaceholder, title } = opts;
+  const { name, title, includePlaceholder, clientlib, frontendBundled } = opts;
   const rootClass = `${name}-cmp`;
+  const embedsAnything = !!clientlib && (clientlib.embedsCss || clientlib.embedsJs);
   const useAttrs: string[] = [];
-  if (clientlibCategory && (embedsCss || embedsJs)) {
+  if (embedsAnything) {
     useAttrs.push('data-sly-use.clientlib="core/wcm/components/commons/v1/templates/clientlib.html"');
   }
   if (includePlaceholder) {
@@ -102,8 +109,11 @@ export function htlMarkup(opts: HtlMarkupOptions): string {
 
   const lines: string[] = [];
   lines.push(`<div class="${rootClass}"${useAttrsStr}>`);
-  if (clientlibCategory && embedsCss) {
-    lines.push(`  <sly data-sly-call="\${clientlib.css @ categories='${clientlibCategory}'}"/>`);
+  if (clientlib && clientlib.embedsCss) {
+    lines.push(`  <sly data-sly-call="\${clientlib.css @ categories='${clientlib.category}'}"/>`);
+  }
+  if (frontendBundled) {
+    lines.push('  <!-- Estilos/JS de este componente compilados con webpack (ui.frontend) — se cargan junto con el resto del sitio, no hay una categoría de clientlib propia de este componente que embeber aquí. -->');
   }
   if (includePlaceholder) {
     lines.push(`  <sly data-sly-test="\${wcmmode.edit}">`);
@@ -112,8 +122,8 @@ export function htlMarkup(opts: HtlMarkupOptions): string {
     lines.push('  <!-- TODO: reemplaza este placeholder por una condición real una vez el diálogo tenga campos -->');
   }
   lines.push('  <!-- TODO: contenido del componente -->');
-  if (clientlibCategory && embedsJs) {
-    lines.push(`  <sly data-sly-call="\${clientlib.js @ categories='${clientlibCategory}'}"/>`);
+  if (clientlib && clientlib.embedsJs) {
+    lines.push(`  <sly data-sly-call="\${clientlib.js @ categories='${clientlib.category}'}"/>`);
   }
   lines.push('</div>');
   return lines.join('\n') + '\n';

@@ -2,6 +2,12 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.3 — Fix del embed de clientlib + carpeta de estilos/JS personalizable
+
+- **Bug corregido**: con `ui.frontend` activo, el HTL generado embebía igual un `data-sly-call` hacia una categoría de clientlib que nunca se creaba (porque con webpack los estilos/JS se compilan junto con el resto del sitio, no como una clientlib propia del componente). Ahora ese embed solo se genera cuando de verdad se creó una clientlib clásica; con `ui.frontend` deja un comentario explicativo en su lugar.
+- **Carpeta de estilos/JS personalizable**: nuevo campo "Carpeta donde se generarán los estilos/JS" junto al switch de estilos/JS, con botón "📁 Elegir..." (selector nativo de carpetas de VS Code). Se precarga sola con la ruta por defecto (distinta según se use `ui.frontend` o una clientlib clásica) y se recalcula en vivo al cambiar nombre/versión/switch de frontend, hasta que el usuario la edita a mano o elige una carpeta — a partir de ahí deja de tocarla.
+- El registro en el entrypoint de webpack ahora calcula la ruta de import siempre relativa entre el archivo encontrado y la carpeta real elegida (antes asumía la convención `components/<nombre>/...`), así sigue funcionando aunque la carpeta elegida esté fuera de esa convención.
+
 ## 2.1.2 — "Crear nuevo..." visible en toda `ui.apps`, no solo sobre `components`
 
 - **Menú ampliado, a pedido explícito**: el submenú "Crear nuevo..." ahora aparece al hacer clic derecho sobre **cualquier carpeta dentro de `ui.apps`** (antes exigía que la ruta contuviera "components"). La condición `when` no puede leer el disco, así que solo valida ubicación (`jcr_root` + `ui.apps`).

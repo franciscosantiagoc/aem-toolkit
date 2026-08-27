@@ -5,7 +5,7 @@ import { findAemProjectForPath } from '../core/projectDetector';
 import { getConfig } from '../config';
 import { isValidJcrNodeName, scanComponentsFolder } from './componentDetector';
 import { buildComponentPanelInitialState, renderComponentPanelHtml } from './componentPanel';
-import { ComponentCreatePayload, planComponentCreate, registerWebpackEntry, writePlan } from './componentGenerator';
+import { ComponentCreatePayload, computeDefaultAssetsDir, planComponentCreate, registerWebpackEntry, writePlan } from './componentGenerator';
 import { openDialogEditor } from '../dialog/dialogPanel';
 
 function isValidStyleExt(v: unknown): v is 'css' | 'scss' | 'less' {
@@ -20,6 +20,7 @@ function validatePayload(payload: any): payload is ComponentCreatePayload {
   if (typeof payload.generateStyles !== 'boolean' || typeof payload.generateJs !== 'boolean') return false;
   if (payload.generateStyles && !isValidStyleExt(payload.styleExt)) return false;
   if (typeof payload.addToFrontend !== 'boolean') return false;
+  if (payload.assetsDir !== undefined && typeof payload.assetsDir !== 'string') return false;
   const adv = payload.advanced;
   if (!adv || typeof adv !== 'object') return false;
   for (const k of ['editConfig', 'designDialog', 'template', 'placeholder', 'openDialogAfterCreate']) {
@@ -76,6 +77,31 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
   panel.webview.html = renderComponentPanelHtml(buildComponentPanelInitialState(project, scan));
 
   panel.webview.onDidReceiveMessage(async (msg: any) => {
+    if (msg?.type === 'computeDefaultAssetsDir') {
+      if (typeof msg.name === 'string' && isValidJcrNodeName(msg.name)) {
+        const versionNumber = typeof msg.versionNumber === 'number' ? msg.versionNumber : undefined;
+        const dir = computeDefaultAssetsDir(project, msg.name, !!msg.useFrontend, versionNumber);
+        panel.webview.postMessage({ type: 'defaultAssetsDir', path: dir });
+      }
+      return;
+    }
+
+    if (msg?.type === 'browseFolder') {
+      const current = typeof msg.current === 'string' ? msg.current : '';
+      const anchor = current && fs.existsSync(current) ? current : componentsPath;
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectFiles: false,
+        canSelectMany: false,
+        defaultUri: vscode.Uri.file(anchor),
+        openLabel: 'Elegir carpeta'
+      });
+      if (picked && picked[0]) {
+        panel.webview.postMessage({ type: 'folderPicked', path: picked[0].fsPath });
+      }
+      return;
+    }
+
     if (msg?.type !== 'create') return;
     const payload = msg.payload;
     if (!validatePayload(payload)) {
@@ -105,7 +131,7 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
 
       const notes: string[] = [];
       if (plan.webpackAssets) {
-        const reg = registerWebpackEntry(project, payload.name, plan.webpackAssets.styleFile, plan.webpackAssets.jsFile);
+        const reg = registerWebpackEntry(project, plan.webpackAssets.styleFile, plan.webpackAssets.jsFile);
         if (plan.webpackAssets.styleFile && !reg.styleEntryFile) {
           notes.push('No se encontró un punto de entrada de estilos reconocible en ui.frontend — agrega el @import del nuevo componente a mano.');
         }
@@ -118,6 +144,8 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
 
       const relDir = path.relative(project.rootPath, plan.realComponentDir);
       let message = `Componente "${payload.name}" creado en "${relDir}".`;
+      const assetsRelDir = plan.classicClientlibDir ?? (plan.webpackAssets ? path.dirname(plan.webpackAssets.styleFile ?? plan.webpackAssets.jsFile ?? '') : undefined);
+      if (assetsRelDir) message += ` Estilos/JS en "${path.relative(project.rootPath, assetsRelDir)}".`;
       if (notes.length) message += ' ⚠ ' + notes.join(' ');
       vscode.window.showInformationMessage(message);
 

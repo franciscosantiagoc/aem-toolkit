@@ -23,6 +23,9 @@ export interface ComponentCreatePayload {
   styleExt: StyleExt;
   generateJs: boolean;
   addToFrontend: boolean;
+  /** Carpeta elegida por el usuario para los estilos/JS (absoluta), o undefined/vacío para usar la
+   * calculada por defecto (`computeDefaultAssetsDir`) según `addToFrontend`. */
+  assetsDir: string | undefined;
   advanced: {
     editConfig: boolean;
     designDialog: boolean;
@@ -58,6 +61,28 @@ export interface ComponentCreatePlan {
 }
 
 /**
+ * Carpeta por defecto donde van los estilos/JS de un componente, según si van a `ui.frontend`
+ * (webpack) o a una clientlib clásica propia dentro del componente. Única fuente de verdad tanto
+ * para la vista previa en vivo del formulario (`componentCreate.ts` responde a
+ * `computeDefaultAssetsDir` con esto) como para el plan real de creación, para que nunca queden
+ * desincronizados.
+ */
+export function computeDefaultAssetsDir(
+  project: AemProjectInfo,
+  name: string,
+  useFrontend: boolean,
+  versionNumber: number | undefined
+): string {
+  if (useFrontend) {
+    return path.join(project.rootPath, 'ui.frontend', 'src', 'main', 'webpack', 'components', name);
+  }
+  const componentsPath = project.componentsPath!;
+  const baseDir = path.join(componentsPath, name);
+  const realComponentDir = versionNumber !== undefined ? path.join(baseDir, `v${versionNumber}`) : baseDir;
+  return path.join(realComponentDir, 'clientlibs', name);
+}
+
+/**
  * Calcula el plan completo de creación (rutas + contenido de cada archivo) sin tocar el disco
  * todavía — separado de la escritura real para poder mostrar una vista previa y para poder testear
  * la lógica sin filesystem real.
@@ -89,16 +114,19 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
   const clientlibCategory = `${namespace}.${name}`;
   const useFrontend = project.hasFrontendModule && payload.addToFrontend && (payload.generateStyles || payload.generateJs);
   const useClassicClientlib = !useFrontend && (payload.generateStyles || payload.generateJs);
+  const assetsDir =
+    payload.assetsDir && payload.assetsDir.trim()
+      ? payload.assetsDir.trim()
+      : computeDefaultAssetsDir(project, name, useFrontend, nextVersion);
 
   files.push({
     absPath: path.join(realComponentDir, `${name}.html`),
     content: htlMarkup({
       name,
       title,
-      clientlibCategory: payload.generateStyles || payload.generateJs ? clientlibCategory : undefined,
-      embedsCss: payload.generateStyles,
-      embedsJs: payload.generateJs,
-      includePlaceholder: payload.advanced.placeholder
+      includePlaceholder: payload.advanced.placeholder,
+      clientlib: useClassicClientlib ? { category: clientlibCategory, embedsCss: payload.generateStyles, embedsJs: payload.generateJs } : undefined,
+      frontendBundled: useFrontend
     })
   });
 
@@ -116,7 +144,7 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
 
   let classicClientlibDir: string | undefined;
   if (useClassicClientlib) {
-    classicClientlibDir = path.join(realComponentDir, 'clientlibs', name);
+    classicClientlibDir = assetsDir;
     const cssFileName = `${name}.${payload.styleExt}`;
     const jsFileName = `${name}.js`;
     files.push({
@@ -135,15 +163,14 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
 
   let webpackAssets: ComponentCreatePlan['webpackAssets'];
   if (useFrontend) {
-    const webpackComponentDir = path.join(project.rootPath, 'ui.frontend', 'src', 'main', 'webpack', 'components', name);
     let styleFile: string | undefined;
     let jsFile: string | undefined;
     if (payload.generateStyles) {
-      styleFile = path.join(webpackComponentDir, `_${name}.${payload.styleExt}`);
+      styleFile = path.join(assetsDir, `_${name}.${payload.styleExt}`);
       files.push({ absPath: styleFile, content: starterStyleContent(name, payload.styleExt) });
     }
     if (payload.generateJs) {
-      jsFile = path.join(webpackComponentDir, `${name}.js`);
+      jsFile = path.join(assetsDir, `${name}.js`);
       files.push({ absPath: jsFile, content: starterJsContent(name) });
     }
     webpackAssets = { styleFile, jsFile };
@@ -172,6 +199,17 @@ function findFirstExisting(baseDir: string, candidates: string[]): string | unde
   return undefined;
 }
 
+/** Ruta de import relativa DESDE la carpeta de `fromFile` HACIA `toFile`, con separadores "/" (los
+ * que entienden webpack/sass/less sin importar el SO), con extensión recortada cuando corresponde
+ * (los `@import` de Sass/Less no llevan extensión), y con el prefijo "./" que exige un import
+ * relativo. Se calcula así (en vez de asumir la convención `components/<nombre>/...`) porque el
+ * usuario puede haber elegido cualquier carpeta para los estilos/JS del componente. */
+function relativeImportPath(fromFile: string, toFile: string, stripExt?: string): string {
+  let rel = path.relative(path.dirname(fromFile), toFile).split(path.sep).join('/');
+  if (stripExt && rel.endsWith(stripExt)) rel = rel.slice(0, -stripExt.length);
+  return rel.startsWith('.') ? rel : './' + rel;
+}
+
 /**
  * Intenta registrar el nuevo componente en el punto de entrada de webpack que el proyecto ya
  * compila (`@import`/`import` en el archivo agregador de estilos/JS de `components`, o si no existe
@@ -180,12 +218,7 @@ function findFirstExisting(baseDir: string, candidates: string[]): string | unde
  * reconocible, no rompe la creación del componente — deja `styleEntryFile`/`jsEntryFile` en null
  * para que quien llama avise al usuario que debe agregar el import a mano.
  */
-export function registerWebpackEntry(
-  project: AemProjectInfo,
-  name: string,
-  styleFile: string | undefined,
-  jsFile: string | undefined
-): WebpackRegistrationResult {
+export function registerWebpackEntry(project: AemProjectInfo, styleFile: string | undefined, jsFile: string | undefined): WebpackRegistrationResult {
   const webpackRoot = path.join(project.rootPath, 'ui.frontend', 'src', 'main', 'webpack');
   const result: WebpackRegistrationResult = { styleEntryFile: null, jsEntryFile: null };
 
@@ -194,7 +227,7 @@ export function registerWebpackEntry(
     const aggregator = findFirstExisting(webpackRoot, STYLE_AGGREGATOR_CANDIDATES.filter((c) => c.endsWith(ext)));
     const target = aggregator ?? findFirstExisting(webpackRoot, STYLE_ENTRY_CANDIDATES.filter((c) => c.endsWith(ext)));
     if (target) {
-      const importLine = `@import './${aggregator ? '' : 'components/'}${name}/${path.basename(styleFile, ext)}';\n`;
+      const importLine = `@import '${relativeImportPath(target, styleFile, ext)}';\n`;
       appendIfMissing(target, importLine);
       result.styleEntryFile = path.relative(project.rootPath, target);
     }
@@ -204,8 +237,7 @@ export function registerWebpackEntry(
     const aggregator = findFirstExisting(webpackRoot, JS_AGGREGATOR_CANDIDATES);
     const target = aggregator ?? findFirstExisting(webpackRoot, JS_ENTRY_CANDIDATES);
     if (target) {
-      const relativeFromTarget = aggregator ? `./${name}/${path.basename(jsFile)}` : `./components/${name}/${path.basename(jsFile)}`;
-      const importLine = `import '${relativeFromTarget}';\n`;
+      const importLine = `import '${relativeImportPath(target, jsFile)}';\n`;
       appendIfMissing(target, importLine);
       result.jsEntryFile = path.relative(project.rootPath, target);
     }
