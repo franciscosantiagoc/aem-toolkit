@@ -2,6 +2,12 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.2 — "Crear nuevo..." visible en toda `ui.apps`, no solo sobre `components`
+
+- **Menú ampliado, a pedido explícito**: el submenú "Crear nuevo..." ahora aparece al hacer clic derecho sobre **cualquier carpeta dentro de `ui.apps`** (antes exigía que la ruta contuviera "components"). La condición `when` no puede leer el disco, así que solo valida ubicación (`jcr_root` + `ui.apps`).
+- **Chequeo real movido al comando**: si la carpeta sobre la que se hizo clic ya es un componente existente (tiene su propio `.content.xml` — proxy, versión real, o componente sin versión), se avisa y no se abre el formulario, en vez de adivinar qué hacer. Redirige al flujo que ya funciona: crear con el mismo nombre desde `components` (o cualquier otra carpeta de `ui.apps`) con "Componente versionado" activado.
+- El caso de "agregar una versión nueva haciendo clic derecho directamente sobre el componente existente" queda pendiente para una iteración siguiente.
+
 ## 2.1.1 — Fix: el submenú "Crear nuevo..." no aparecía en Windows
 
 - **Bug**: la condición `when` del submenú "Crear nuevo..." usaba una expresión regular que exigía `/` como separador de ruta (`resourcePath =~ /jcr_root.*\/components(\/|$)/`). En Windows, `resourcePath` viene con barras invertidas (`\`), así que la condición nunca se cumplía y el submenú no aparecía al hacer clic derecho ni sobre `components` ni sobre ninguna subcarpeta.

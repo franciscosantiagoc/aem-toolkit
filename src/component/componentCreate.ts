@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 import { findAemProjectForPath } from '../core/projectDetector';
 import { getConfig } from '../config';
@@ -32,6 +33,23 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
   if (!target) {
     vscode.window.showWarningMessage('Haz clic derecho sobre la carpeta "components" (o una subcarpeta suya) para crear un componente.');
     return;
+  }
+
+  // Si la carpeta sobre la que se hizo clic ya ES un componente (proxy, versión real, o
+  // componente sin versión — todos tienen su propio .content.xml), no tiene sentido ofrecer
+  // "Crear nuevo" ahí: el caso de "agregar una versión nueva a este componente" queda para una
+  // iteración siguiente. Se avisa y se redirige al flujo que ya funciona (mismo nombre, desde
+  // "components", con el switch de versionado activado).
+  try {
+    if (fs.statSync(target.fsPath).isDirectory() && fs.existsSync(path.join(target.fsPath, '.content.xml'))) {
+      const componentName = path.basename(target.fsPath);
+      vscode.window.showWarningMessage(
+        `"${componentName}" ya es un componente. Agregar una versión nueva haciendo clic derecho directamente sobre un componente existente todavía no está soportado — usa "Crear nuevo... → Componente" sobre "components" (o cualquier otra carpeta de ui.apps) con el mismo nombre "${componentName}" y "Componente versionado" activado; la extensión calcula sola la siguiente versión.`
+      );
+      return;
+    }
+  } catch {
+    // La ruta no existe o no se pudo leer — se ignora acá, el resto del flujo ya maneja ese caso.
   }
 
   const project = findAemProjectForPath(target.fsPath);
