@@ -6,6 +6,7 @@ import { getConfig } from '../config';
 import { isValidJcrNodeName, scanComponentsFolder } from './componentDetector';
 import { buildComponentPanelInitialState, renderComponentPanelHtml } from './componentPanel';
 import { ComponentCreatePayload, computeAssetSubPaths, computeDefaultAssetsDir, planComponentCreate, registerWebpackEntry, writePlan } from './componentGenerator';
+import { isAlreadyVersionedComponent, migrateComponentToVariant } from './componentVariant';
 import { openDialogEditor } from '../dialog/dialogPanel';
 
 function isValidStyleExt(v: unknown): v is 'css' | 'scss' | 'less' {
@@ -36,23 +37,6 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
     return;
   }
 
-  // Si la carpeta sobre la que se hizo clic ya ES un componente (proxy, versión real, o
-  // componente sin versión — todos tienen su propio .content.xml), no tiene sentido ofrecer
-  // "Crear nuevo" ahí: el caso de "agregar una versión nueva a este componente" queda para una
-  // iteración siguiente. Se avisa y se redirige al flujo que ya funciona (mismo nombre, desde
-  // "components", con el switch de versionado activado).
-  try {
-    if (fs.statSync(target.fsPath).isDirectory() && fs.existsSync(path.join(target.fsPath, '.content.xml'))) {
-      const componentName = path.basename(target.fsPath);
-      vscode.window.showWarningMessage(
-        `"${componentName}" ya es un componente. Agregar una versión nueva haciendo clic derecho directamente sobre un componente existente todavía no está soportado — usa "Crear nuevo... → Componente" sobre "components" (o cualquier otra carpeta de ui.apps) con el mismo nombre "${componentName}" y "Componente versionado" activado; la extensión calcula sola la siguiente versión.`
-      );
-      return;
-    }
-  } catch {
-    // La ruta no existe o no se pudo leer — se ignora acá, el resto del flujo ya maneja ese caso.
-  }
-
   const project = findAemProjectForPath(target.fsPath);
   if (!project) {
     vscode.window.showErrorMessage('AEM Toolkit: no se pudo detectar el proyecto AEM (pom.xml con <modules>) que contiene esta carpeta.');
@@ -63,6 +47,58 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
       'AEM Toolkit: no se encontró la carpeta "components" del namespace bajo ui.apps. Configura "aemToolkit.namespace" si el namespace no se pudo autodetectar.'
     );
     return;
+  }
+
+  // Si la carpeta sobre la que se hizo clic ya ES un componente (tiene su propio .content.xml):
+  // - Si ya está versionado (tiene subcarpetas v1/v2... con su propio .content.xml), es un proxy —
+  //   no tiene sentido ofrecer "Crear nuevo" ahí; se redirige al flujo que ya funciona (mismo nombre,
+  //   con "Componente versionado" activado, la extensión calcula sola la siguiente versión).
+  // - Si NO está versionado todavía (es un componente real sin versión, con su contenido directo en
+  //   la carpeta), se ofrece convertirlo en una variante: el contenido actual pasa a v1, se duplica a
+  //   v2, y la carpeta pasa a ser el proxy apuntando a v2 (ver componentVariant.ts).
+  try {
+    if (fs.statSync(target.fsPath).isDirectory() && fs.existsSync(path.join(target.fsPath, '.content.xml'))) {
+      const componentName = path.basename(target.fsPath);
+
+      if (isAlreadyVersionedComponent(target.fsPath)) {
+        vscode.window.showWarningMessage(
+          `"${componentName}" ya es un componente versionado (proxy). Para agregar una versión nueva, usa "Crear nuevo... → Componente" sobre "components" (o cualquier otra carpeta de ui.apps) con el mismo nombre "${componentName}" y "Componente versionado" activado; la extensión calcula sola la siguiente versión.`
+        );
+        return;
+      }
+
+      const choice = await vscode.window.showWarningMessage(
+        `"${componentName}" ya contiene un componente. ¿Deseas crear una variante (versión nueva)? El contenido actual pasará a ser "v1", se duplicará para crear "v2" como punto de partida de la variante, y "${componentName}" pasará a ser un proxy versionado apuntando a "v2".`,
+        { modal: true },
+        'Crear variante'
+      );
+      if (choice !== 'Crear variante') return;
+
+      try {
+        const result = migrateComponentToVariant(target.fsPath, project.namespace ?? '<namespace>');
+        const relV2 = path.relative(project.rootPath, result.v2Dir);
+        vscode.window.showInformationMessage(
+          `"${result.componentName}" convertido a componente versionado. "v1" conserva el contenido original; "v2" ("${relV2}") es la variante nueva — ajústala a mano. El proxy en "${componentName}" ya apunta a "v2".`
+        );
+
+        // Abre el HTML y el diálogo de v2 (si existen), para encadenar directo con la edición de la
+        // variante nueva — mismo criterio que al crear un componente desde cero (ver v2.1.7/v2.1.8).
+        const htmlPath = path.join(result.v2Dir, `${result.componentName}.html`);
+        if (fs.existsSync(htmlPath)) {
+          await vscode.window.showTextDocument(vscode.Uri.file(htmlPath), { preview: false });
+        }
+        const dialogXmlPath = path.join(result.v2Dir, '_cq_dialog', '.content.xml');
+        if (fs.existsSync(dialogXmlPath)) {
+          await openDialogEditor(context, vscode.Uri.file(dialogXmlPath));
+        }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(`No se pudo convertir "${componentName}" en variante: ${detail}`);
+      }
+      return;
+    }
+  } catch {
+    // La ruta no existe o no se pudo leer — se ignora acá, el resto del flujo ya maneja ese caso.
   }
 
   const utilsFolderName = path.basename(getConfig().componentsUtilsPath || 'utils');

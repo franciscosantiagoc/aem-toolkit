@@ -25,7 +25,10 @@ export interface ComponentsFolderScan {
   existingGroups: string[];
 }
 
-function isVersionFolderName(name: string): number | undefined {
+/** `"v1"` -> `1`, `"v12"` -> `12`, cualquier otro nombre -> `undefined`. Exportada (además de usarse
+ * acá) para que `componentVariant.ts` pueda distinguir un componente ya versionado (tiene subcarpetas
+ * `vN` con su propio `.content.xml`) de uno todavía sin versionar, al decidir qué flujo ofrecer. */
+export function isVersionFolderName(name: string): number | undefined {
   const m = /^v(\d+)$/.exec(name);
   return m ? parseInt(m[1], 10) : undefined;
 }

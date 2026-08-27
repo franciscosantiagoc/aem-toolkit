@@ -2,6 +2,13 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.10 — Convertir un componente sin versionar en variante
+
+- **A pedido explícito, cierra un pendiente de la v2.1.2**: al hacer clic derecho con "Crear componente" directamente sobre la carpeta de un componente **ya existente pero sin versionar** (tiene su propio `.content.xml` y su contenido real directo adentro, sin subcarpetas `v1`/`v2`), ahora se pregunta con un modal si se quiere crear una variante (versión nueva) en vez de solo avisar que la carpeta ya contiene un componente.
+- Si se confirma ("Crear variante"): todo el contenido actual se mueve tal cual a `v1/` (nada se reescribe — propiedades del `.content.xml` original, clientlib propia si la hubiera, todo intacto), la carpeta pasa a ser el **proxy** reusando ese mismo `.content.xml` original (se le agrega/actualiza únicamente `sling:resourceSuperType`, el resto de propiedades — título, grupo, ícono, `allowedParents`... — se preservan tal cual), y `v1` se duplica tal cual para crear `v2` como punto de partida de la variante nueva, con el proxy apuntando a `v2`. Después se auto-abren el `.html` y el diálogo de `v2` (mismo criterio de apertura automática que al crear un componente desde cero), listos para que el usuario ajuste la variante a mano.
+- Si la carpeta ya es un componente **versionado** (proxy con subcarpetas `vN`), se sigue mostrando el aviso-y-redirección de siempre (sin este modal) — el flujo para agregar una versión nueva a un componente ya versionado sigue siendo el mismo de antes (invocar "Crear componente" desde `components` con el mismo nombre y "Componente versionado" activado).
+- Nuevo módulo `src/component/componentVariant.ts` (`isAlreadyVersionedComponent`, `migrateComponentToVariant`), consumido desde `componentCreate.ts`.
+
 ## 2.1.9 — Todo el XML del componente se genera ya formateado
 
 - **A pedido explícito**: los `.xml` que se generan al crear un componente (`.content.xml` del componente y del proxy, `_cq_dialog`, `_cq_editConfig.xml`, `_cq_design_dialog`, `_cq_template`, y el `.content.xml` de la clientlib clásica) ya no quedan con el string literal crudo de cada plantilla — se reformatean con el mismo estilo que usa "AEM: Formatear XML" antes de escribirse (abertura + primer atributo en la primera línea, atributos adicionales uno por línea, cierre siempre en su propia línea, sin autocierres).
