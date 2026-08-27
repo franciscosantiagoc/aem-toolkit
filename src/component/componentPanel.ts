@@ -139,7 +139,7 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
     </div>
     <div class="adv-item switch-row">
       <input type="checkbox" id="advOpenDialog" checked />
-      <span class="switch-label">Abrir el diálogo en el editor visual apenas se cree el componente</span>
+      <span class="switch-label">Abrir la hoja de estilos, el HTML y el diálogo (en el editor visual) apenas se cree el componente</span>
     </div>
   </details>
 

@@ -163,10 +163,25 @@ export async function createComponentWizard(context: vscode.ExtensionContext, ur
         const assetsRelDir = path.dirname(plan.webpackAssets.styleFile ?? plan.webpackAssets.jsFile ?? '');
         message += ` Estilos/JS en "${path.relative(project.rootPath, assetsRelDir)}".`;
       }
+      if (plan.preservedExistingFiles.length) {
+        const relPreserved = plan.preservedExistingFiles.map((p) => `"${path.relative(project.rootPath, p)}"`);
+        message += ` ℹ Ya existían y no se sobrescribieron (misma clientlib compartida entre versiones): ${relPreserved.join(', ')}.`;
+      }
       if (notes.length) message += ' ⚠ ' + notes.join(' ');
       vscode.window.showInformationMessage(message);
 
       if (payload.advanced.openDialogAfterCreate) {
+        // Abre estilos + HTML como pestañas normales, y el diálogo al final en el editor visual —
+        // así el diálogo queda como pestaña activa, que es lo más probable que el usuario quiera
+        // seguir editando justo después de crear el componente.
+        const styleFilePath = plan.classicAssets?.cssFile ?? plan.webpackAssets?.styleFile;
+        if (styleFilePath && fs.existsSync(styleFilePath)) {
+          await vscode.window.showTextDocument(vscode.Uri.file(styleFilePath), { preview: false });
+        }
+        const htmlPath = path.join(plan.realComponentDir, `${payload.name}.html`);
+        if (fs.existsSync(htmlPath)) {
+          await vscode.window.showTextDocument(vscode.Uri.file(htmlPath), { preview: false });
+        }
         const dialogXmlPath = path.join(plan.realComponentDir, '_cq_dialog', '.content.xml');
         await openDialogEditor(context, vscode.Uri.file(dialogXmlPath));
       }

@@ -2,6 +2,11 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.7 — Apertura automática de archivos + no sobrescribir una clientlib ya existente
+
+- **A pedido explícito**: al crear el componente, con la opción "Abrir el diálogo apenas se cree el componente" (activada por defecto, ahora también cubre esto) se abren automáticamente, en este orden, como pestañas: la hoja de estilos (si se generó), el `.html` del componente, y por último el `_cq_dialog` en el editor visual (queda como pestaña activa). El JS no se abre solo. Si el switch está desactivado, no se abre nada automáticamente.
+- **A pedido explícito — no se pisa una clientlib ya existente**: antes de escribir el CSS/JS de una clientlib clásica (o del parcial en `ui.frontend`), la extensión valida si el archivo ya existe en esa ruta — el caso típico es crear una versión nueva de un componente versionado, que comparte la misma clientlib clásica que su versión anterior (ya personalizada a mano). Si ya existe, se preserva tal cual (no se sobrescribe con el contenido de arranque) y se avisa en el mensaje de confirmación tras crear el componente. Los metadatos de la clientlib (`.content.xml`, `css.txt`, `js.txt`) sí se regeneran siempre, para reflejar el switch de estilos/JS vigente.
+
 ## 2.1.6 — CSS por defecto en clientlib clásica + placeholder reordenado
 
 - **A pedido explícito**: al elegir generar estilos, la extensión precargada en el selector ahora depende del modo — con `ui.frontend` se sigue respetando la extensión dominante/detectada del proyecto (sin cambios), pero con clientlib clásica se precarga **CSS** en vez de eso (no hay paso de compilación en `ui.apps`, es la opción más segura por defecto). El usuario puede cambiarlo igual con el selector, y a partir de ahí deja de recalcularse solo al alternar el switch de frontend — mismo patrón de "no pisar una elección manual" que ya usan la carpeta de assets y el título.

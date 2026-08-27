@@ -56,8 +56,16 @@ export interface ComponentCreatePlan {
   files: PlannedFile[];
   /** Carpeta de la clientlib clásica creada (si `addToFrontend` es false o no hay `ui.frontend`), o undefined si no se generó ninguna. */
   classicClientlibDir: string | undefined;
+  /** Rutas absolutas del CSS/JS de la clientlib clásica (dentro de sus subcarpetas `css/`/`js/`), presentes solo cuando `classicClientlibDir` aplica y el switch correspondiente estaba activo. */
+  classicAssets: { cssFile: string | undefined; jsFile: string | undefined } | undefined;
   /** Contenido de estilos/JS a escribir en `ui.frontend` cuando corresponde, para que el que llama se encargue de registrarlos en el entrypoint de webpack (ver `registerWebpackEntry`). */
   webpackAssets: { styleFile: string | undefined; jsFile: string | undefined } | undefined;
+  /** Rutas absolutas de CSS/JS que YA existían en destino y por eso NO se sobreescribieron (se
+   * preservó su contenido tal cual estaba) — pasa típicamente al crear una versión nueva de un
+   * componente versionado, cuya clientlib clásica es compartida entre versiones (ver
+   * `computeDefaultAssetsDir`), o al re-generar sobre una carpeta de `ui.frontend` ya usada. Sirve
+   * para avisar al usuario en vez de pisar en silencio un CSS/JS que ya tenía código real. */
+  preservedExistingFiles: string[];
 }
 
 /**
@@ -166,24 +174,49 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
     files.push({ absPath: path.join(realComponentDir, '_cq_template', '.content.xml'), content: templateContentXml(title, resourceTypePath) });
   }
 
+  const preservedExistingFiles: string[] = [];
+
   let classicClientlibDir: string | undefined;
+  let classicAssets: ComponentCreatePlan['classicAssets'];
   if (useClassicClientlib) {
     classicClientlibDir = assetsDir;
     const { cssDir: cssSubDir, jsDir: jsSubDir } = computeAssetSubPaths(assetsDir, false);
     const cssFileName = `${name}.${payload.styleExt}`;
     const jsFileName = `${name}.js`;
+    const cssFilePath = path.join(cssSubDir, cssFileName);
+    const jsFilePath = path.join(jsSubDir, jsFileName);
+
+    // .content.xml/css.txt/js.txt son metadatos declarativos — se regeneran siempre (para que
+    // reflejen el switch de estilos/JS vigente, ej. si una versión nueva agrega JS a una clientlib
+    // que antes solo tenía CSS). El CSS/JS de verdad NO: si ya existe (típicamente porque esta
+    // clientlib es compartida con una versión anterior del mismo componente — ver
+    // `computeDefaultAssetsDir` — o porque se está re-generando sobre una carpeta ya usada), se
+    // preserva tal cual en vez de pisarlo con el contenido de arranque.
     files.push({
       absPath: path.join(classicClientlibDir, '.content.xml'),
       content: clientlibContentXml(clientlibCategory, payload.generateStyles, payload.generateJs)
     });
+    let cssFile: string | undefined;
+    let jsFile: string | undefined;
     if (payload.generateStyles) {
+      cssFile = cssFilePath;
       files.push({ absPath: path.join(classicClientlibDir, 'css.txt'), content: clientlibTxt('css', cssFileName) });
-      files.push({ absPath: path.join(cssSubDir, cssFileName), content: starterStyleContent(name, payload.styleExt) });
+      if (fs.existsSync(cssFilePath)) {
+        preservedExistingFiles.push(cssFilePath);
+      } else {
+        files.push({ absPath: cssFilePath, content: starterStyleContent(name, payload.styleExt) });
+      }
     }
     if (payload.generateJs) {
+      jsFile = jsFilePath;
       files.push({ absPath: path.join(classicClientlibDir, 'js.txt'), content: clientlibTxt('js', jsFileName) });
-      files.push({ absPath: path.join(jsSubDir, jsFileName), content: starterJsContent(name) });
+      if (fs.existsSync(jsFilePath)) {
+        preservedExistingFiles.push(jsFilePath);
+      } else {
+        files.push({ absPath: jsFilePath, content: starterJsContent(name) });
+      }
     }
+    classicAssets = { cssFile, jsFile };
   }
 
   let webpackAssets: ComponentCreatePlan['webpackAssets'];
@@ -193,16 +226,33 @@ export function planComponentCreate(project: AemProjectInfo, payload: ComponentC
     let jsFile: string | undefined;
     if (payload.generateStyles) {
       styleFile = path.join(cssDir, `_${name}.${payload.styleExt}`);
-      files.push({ absPath: styleFile, content: starterStyleContent(name, payload.styleExt) });
+      if (fs.existsSync(styleFile)) {
+        preservedExistingFiles.push(styleFile);
+      } else {
+        files.push({ absPath: styleFile, content: starterStyleContent(name, payload.styleExt) });
+      }
     }
     if (payload.generateJs) {
       jsFile = path.join(jsDir, `${name}.js`);
-      files.push({ absPath: jsFile, content: starterJsContent(name) });
+      if (fs.existsSync(jsFile)) {
+        preservedExistingFiles.push(jsFile);
+      } else {
+        files.push({ absPath: jsFile, content: starterJsContent(name) });
+      }
     }
     webpackAssets = { styleFile, jsFile };
   }
 
-  return { realComponentDir, resourceTypePath, versionNumber: nextVersion, files, classicClientlibDir, webpackAssets };
+  return {
+    realComponentDir,
+    resourceTypePath,
+    versionNumber: nextVersion,
+    files,
+    classicClientlibDir,
+    classicAssets,
+    webpackAssets,
+    preservedExistingFiles
+  };
 }
 
 export function writePlan(plan: ComponentCreatePlan): void {
