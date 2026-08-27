@@ -2,6 +2,11 @@
 
 > Detalle de cada cambio dentro de la serie 2.0.0.x. Cuando esta serie se dé por estable y se pase a la próxima versión mayor, este archivo queda congelado tal cual (igual que `CHANGELOG-1.0.0.md`) y se crea `CHANGELOG-3.0.0.md` para lo que siga. Ver `CHANGELOG.md` para el índice de todos los archivos.
 
+## 2.1.1 — Fix: el submenú "Crear nuevo..." no aparecía en Windows
+
+- **Bug**: la condición `when` del submenú "Crear nuevo..." usaba una expresión regular que exigía `/` como separador de ruta (`resourcePath =~ /jcr_root.*\/components(\/|$)/`). En Windows, `resourcePath` viene con barras invertidas (`\`), así que la condición nunca se cumplía y el submenú no aparecía al hacer clic derecho ni sobre `components` ni sobre ninguna subcarpeta.
+- **Fix**: se reemplazó por dos comprobaciones de substring sin separadores (`resourcePath =~ /jcr_root/ && resourcePath =~ /components/`), igual que ya hacían el resto de condiciones de este menú (ninguna de las anteriores probaba separadores explícitos, por eso no se había notado antes).
+
 ## 2.1.0 — "AEM: Crear componente..." (Bloque 17, primera iteración)
 
 - **Nuevo submenú "Crear nuevo..."** anidado dentro de "AEM Toolkit" (clic derecho sobre `components` o una subcarpeta suya, dentro de `jcr_root`), con "Componente" como primera entrada — pensado para que tags/CF Model/template de página (Bloques 3, 5, 10) se agreguen ahí en el futuro sin reestructurar el menú de nuevo.
