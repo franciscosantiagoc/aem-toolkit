@@ -10,82 +10,20 @@ Ver **FEATURES.md** (en esta misma carpeta) para la especificación completa, el
 - Cuando un conjunto de cambios 1.x.x quede confirmado como estable, se pasa a una nueva versión mayor (**2.0.0**), **sin eliminar ni reescribir** la descripción de 1.0.0 de este README — queda como referencia permanente de lo que esa versión ofrecía.
 - Esta sección se amplía con una entrada nueva por cada versión mayor estable (1.0.0, 2.0.0, …), detallando qué hace y en qué se diferencia de la anterior. Para el detalle granular de cada 1.x.x intermedio (mientras se va validando hacia la próxima versión mayor), ver `CHANGELOG-1.0.0.md` (o el archivo de la serie mayor correspondiente — `CHANGELOG-3.0.0.md` para la 3.x.x en curso).
 
-## Versión 3.0.0 (estable) — Bloque 17: Crear componente
+## Desarrollo
 
-Tercera versión mayor estable. Sobre la base de la 2.0.0 (sincronización + editor visual de diálogos), suma todo lo construido a lo largo de la serie **2.1.0 → 2.1.12** (ver `CHANGELOG-2.0.0.md` para el detalle versión por versión): el asistente **"AEM: Crear componente..."** completo.
+```bash
+npm install
+npm run compile   # o: npm run watch
+```
 
-### Crear componente (Bloque 17 — primera iteración; modelo Sling queda pendiente)
+Luego F5 en VS Code (`Run Extension`) para abrir una ventana de prueba con la extensión cargada, apuntando a una carpeta que contenga uno de los proyectos AEM de referencia.
 
-- **"Crear nuevo..." → "Componente"**, clic derecho sobre cualquier carpeta dentro de `ui.apps`: formulario Webview con nombre (validado en vivo contra la convención del proyecto y la ruta resultante), título, grupo de componentes con autocompletado, switch de versionado, switches de estilos/JS con selector de preprocesador (autodetecta el dominante del proyecto, o pide elegir si están mezclados), switch "Añadir al módulo frontend" (si el proyecto tiene `ui.frontend`), y una sección de opciones avanzadas (`_cq_editConfig.xml` de refresco automático, `_cq_design_dialog`, `_cq_template`, placeholder de autoría, apertura automática de estilos/HTML/diálogo al crear).
-- **Esquema de versionado "proxy"** (patrón estándar de Adobe): `components/<nombre>` es un proxy sin versión (`sling:resourceSuperType` apuntando a la versión vigente); la implementación real vive en `components/<nombre>/v1`, `v2`... — el proxy se reescribe para apuntar a la versión nueva cada vez que se agrega una.
-- **Clic derecho directamente sobre un componente ya existente** resuelve sin pasar por el formulario: si no está versionado, ofrece convertirlo en variante (mueve su contenido a `v1`, lo convierte en proxy y duplica `v1` en `v2`); si ya está versionado, ofrece crear directamente la siguiente versión (duplicando la más alta existente y reescribiendo solo el `sling:resourceSuperType` del proxy).
-- **Clientlib consciente de `ui.frontend`**: con frontend activo, los estilos/JS se generan en `ui.frontend/src/main/webpack/components/<nombre>` (o en las 2 carpetas independientes que el usuario elija por separado) y la extensión intenta registrarlos sola en el entrypoint de webpack; sin frontend, se crea una clientlib clásica en `ui.apps` (`clientlibs/clientlib-components/<nombre>`, con CSS y JS en su propia subcarpeta), embebida inline en el HTL con el patrón `clientlib.html` de AEM Core Components — compartida entre todas las versiones de un mismo componente, y nunca sobrescrita si ya existía contenido personalizado ahí.
-- **Carpeta de estilos/JS totalmente personalizable**: campo de texto + explorador de carpetas **embebido dentro del propio panel** (no el selector nativo del sistema operativo), confinado a la carpeta raíz del proyecto actual. Con `ui.frontend` y estilos+JS ambos activos, un switch adicional permite editar la ruta de estilos y la de JS de forma independiente (por defecto ambas reflejan la misma carpeta base).
-- Todo el XML generado (`.content.xml`, `_cq_dialog`, `_cq_editConfig.xml`, `_cq_design_dialog`, `_cq_template`, clientlib clásica) se escribe ya formateado con el mismo estilo que usa "AEM: Formatear XML".
-- El estilo generado arranca con la clase raíz en BEM `.<nombre>-cmp`, ya conectada al elemento raíz del `.html`.
-- **Pendiente para una siguiente iteración**: modelo Sling (con/sin modelo) y el componente React/Angular del Bloque 18, que depende de este.
+Empaquetar (`.vsix`):
 
-### Comandos
-
-- **AEM: Crear componente...** (submenú "Crear nuevo..." dentro de "AEM Toolkit", clic derecho sobre cualquier carpeta de `ui.apps`) (Bloque 17)
-
-### Configuración adicional (`aemToolkit.*`) sobre la de v2.0.0
-
-- `componentsCreateCssJsByDefault` — genera CSS/JS sin preguntar cada vez al crear un componente.
-- `componentsUtilsPath`, `defaultLocales`, `namespace` — ya configurables, preparados para los próximos bloques (i18n, tags, CF Model...) que todavía no están implementados.
-
-## Versión 2.0.0 (estable) — Bloque 2: Sincronización + Bloque 19/20: Editor visual de diálogos
-
-Segunda versión mayor estable. Sobre la base de la 1.0.0 (detección de proyecto + Compilar), suma todo lo construido a lo largo de la serie **1.1.0 → 1.8.1** (ver `CHANGELOG-1.0.0.md` para el detalle versión por versión): subir cambios sin compilar, detección automática del JDK del proyecto, y el editor visual de diálogos con su propio submenú de acceso rápido.
-
-### Subir cambios de front sin compilar (Bloque 2)
-
-- **"AEM: Subir a Author"** / **"AEM: Subir a Publish"**, sobre un archivo o carpeta dentro de `jcr_root` — un archivo sube solo ese archivo, una carpeta sube todo su contenido de forma recursiva.
-- Sincroniza directo contra la **API POST de Sling** (sin Maven ni webpack de por medio). Requiere que el nodo padre ya exista en el servidor — pensado para actualizar algo ya instalado, no para crear estructura nueva desde cero.
-- **Fix real de fondo**: subir un `.content.xml` ahora lo interpreta localmente nodo por nodo (con sus propiedades y tipos — `{Boolean}`, `{Long}`, arreglos, mixins...) y lo reconstruye como una serie de POSTs normales de Sling, en vez de depender del "Import Operation" (`:contentType=xml`) que no entiende el formato Document View real de FileVault y devolvía HTTP 200 sin aplicar nada. Los diálogos de edición (`_cq_dialog`) se reemplazan por completo (los campos que borres del archivo también se borran en AEM); cualquier otro `.content.xml` solo crea/actualiza, nunca borra.
-- Barra de progreso cancelable con un canal de salida ("AEM Toolkit — Sync") que registra el resultado (✔/✘) de cada archivo.
-- **"AEM: Configurar credenciales de sincronización..."**: host/puerto de Author y Publish son configuración normal; la contraseña se guarda en VS Code Secret Storage, nunca en `settings.json`.
-
-### Detección automática del JDK requerido por el proyecto
-
-- **⚙️** en la barra de acciones rápidas del panel de Compilar: detectar el JDK de nuevo, configurar carpetas de búsqueda, configurar el JDK a mano, o abrir la configuración completa.
-- Lee la versión de Java que el proyecto requiere (`maven.compiler.release`/`target`/`source` o `java.version`) y, si no coincide con la del sistema, busca automáticamente una instalación que sí coincida en `aemToolkit.jdkSearchFolders` (hasta 2 carpetas "contenedoras" de varios JDKs) — sin preguntar nada si la encuentra. Si no puede resolverlo solo, avisa con un banner en el panel y pregunta antes de compilar si de todas formas quieres continuar.
-- `aemToolkit.javaHome` fija el JDK a mano para las Tasks de Maven de este proyecto (configuración de workspace, no toca nada global del sistema).
-
-### Editor visual de diálogos (Bloque 19/20 — MVP)
-
-- **"AEM: Editar diálogo..."** (clic derecho sobre `_cq_dialog` o su `.content.xml` en el Explorador) abre un panel dedicado con el diálogo como árbol visual editable: agregar, editar, reordenar y eliminar pestañas, agrupadores (fieldset) y campos.
-- **Catálogo de 20 tipos de campo** (labels en inglés — Textfield, Pathfield, Select, Checkbox, Switch, Multifield, Date picker, File upload, Tags, Heading, etc.), con editor dedicado por tipo (valor por defecto, opciones, ruta raíz, tipo de fecha, MIME types...). Cualquier campo de un tipo fuera del catálogo se conserva tal cual al guardar (no se destruye por no tener editor propio).
-- **Pestañas verdaderamente opcionales**: un diálogo sin pestañas se edita con sus campos planos directo en la raíz — nunca se envuelve forzosamente en una pestaña "General" sintética. Un botón dedicado las agrega cuando hace falta (moviendo los campos existentes a la primera automáticamente), sin poder anidar una segunda estructura de pestañas dentro de otra. Con más de una pestaña, cada campo se puede mover a otra con un clic (o eligiendo cuál, si hay más de dos).
-- **Multicampo (multifield)**: la propiedad real vive en su campo interno repetido (nunca en el contenedor — un bug de duplicado ahí fue la causa real del aviso de "valor repetido" al usarlo en AEM, corregido de fondo), y tanto crearlo como editar su campo interno (tipo, etiqueta, nombre de propiedad) queda cubierto.
-- **XML generado con formato propio**: abertura de etiqueta + primer atributo en la primera línea, atributos adicionales uno por línea indentados un nivel más, cierre de etiqueta siempre en su propia línea alineado con su abertura — nunca autocierre, incluso en nodos sin hijos.
-- **"AEM: Diálogo"** (nuevo acceso rápido, clic derecho **dentro del código** de un diálogo ya abierto): selector con los 5 tipos más usados — Textfield, Pathfield, Checkbox, Select, Multifield — más "Edición avanzada" para abrir el panel completo. Resuelve solo en qué pestaña insertar (pregunta solo si hay más de una) y ofrece subir el cambio a Author/Publish al toque.
-- **📋 "Copiar cómo usarlo"**, ícono en la fila de cada campo (a la izquierda de ✏️ Editar): copia al portapapeles la expresión HTL típica para leer esa propiedad (`${properties.nombre}`) con un comentario del tipo de dato esperado (String, Number, Boolean, Calendar, String[]...) — el tooltip muestra el texto exacto antes de copiarlo.
-- **Guardar**: escribe el `.content.xml` en disco y pregunta si se quiere subir el cambio ahora a Author/Publish. El estado de guardado se ve en rojo si falló, verde si salió bien.
-
-### "AEM: Formatear XML" — de propósito general
-
-- Aplica el mismo formato de indentación del editor de diálogos a **cualquier** `.xml` de Document View del proyecto (no solo diálogos): clic derecho sobre uno o varios `.xml` dentro de `jcr_root`. No reescribe el archivo si ya estaba formateado igual.
-- Detecta y preserva las namespaces reales del archivo original (más allá de las 4 estándar `jcr`/`sling`/`cq`/`nt`) para no perder namespaces propias (ej. `granite`) al reformatear.
-
-### Menús contextuales agrupados
-
-Todos los comandos anteriores quedan bajo un único submenú desplegable **"AEM Toolkit"** (con el ícono de la barra de actividad) tanto en el Explorador como dentro del código — en vez de aparecer como entradas sueltas mezcladas con el resto del menú contextual de VS Code.
-
-### Comandos
-
-- **AEM: Compilar proyecto...** / **AEM: Repetir última compilación** / **AEM: Mostrar información del proyecto detectado** / **AEM: Actualizar detección de proyecto** (Bloque 1, v1.0.0)
-- **AEM: Subir a Author** / **AEM: Subir a Publish** / **AEM: Configurar credenciales de sincronización...** (Bloque 2)
-- **AEM: Editar diálogo...** (Explorador) / **AEM: Diálogo** (acceso rápido, dentro del código) (Bloque 19/20)
-- **AEM: Formatear XML**
-
-### Configuración adicional (`aemToolkit.*`) sobre la de v1.0.0
-
-- `javaHome`, `jdkSearchFolders` — JDK del proyecto.
-- `sync.authorHost`/`authorPort`/`publishHost`/`publishPort`/`username` — destinos de sincronización (la contraseña vive en Secret Storage, no aquí).
-- `maxDialogTabs` — tope de pestañas al armar un diálogo.
-- `componentsCreateCssJsByDefault`, `defaultLocales`, `namespace`, `componentsUtilsPath` — ya configurables, preparados para los próximos bloques (creación de componentes/clientlibs/i18n, ver `FEATURES.md`) que todavía no están implementados.
-
+```bash
+npm run package
+```
 ## Versión 1.0.0 (estable) — Bloque 1: Cimientos + Compilar
 
 Primera versión estable. Cubre por completo el **Bloque 1** del roadmap (`FEATURES.md`): detección de proyecto y todo el ciclo de compilación, con un panel al estilo IntelliJ.
@@ -154,17 +92,79 @@ Todo corre como **VS Code Tasks** (no `sendText` a una terminal) — se sigue vi
 - `compilePresets` — modos personalizados guardados (se administran desde el propio panel).
 - `componentsCreateCssJsByDefault`, `maxDialogTabs`, `defaultLocales`, `namespace`, `componentsUtilsPath` — ya configurables, preparados para los próximos bloques (creación de componentes/diálogos/i18n) que todavía no están implementados.
 
-## Desarrollo
+## Versión 2.0.0 (estable) — Bloque 2: Sincronización + Bloque 5/6: Editor visual de diálogos
 
-```bash
-npm install
-npm run compile   # o: npm run watch
-```
+Segunda versión mayor estable. Sobre la base de la 1.0.0 (detección de proyecto + Compilar), suma todo lo construido a lo largo de la serie **1.1.0 → 1.8.1** (ver `CHANGELOG-1.0.0.md` para el detalle versión por versión): subir cambios sin compilar, detección automática del JDK del proyecto, y el editor visual de diálogos con su propio submenú de acceso rápido.
 
-Luego F5 en VS Code (`Run Extension`) para abrir una ventana de prueba con la extensión cargada, apuntando a una carpeta que contenga uno de los proyectos AEM de referencia.
+### Subir cambios de front sin compilar (Bloque 2)
 
-Empaquetar (`.vsix`):
+- **"AEM: Subir a Author"** / **"AEM: Subir a Publish"**, sobre un archivo o carpeta dentro de `jcr_root` — un archivo sube solo ese archivo, una carpeta sube todo su contenido de forma recursiva.
+- Sincroniza directo contra la **API POST de Sling** (sin Maven ni webpack de por medio). Requiere que el nodo padre ya exista en el servidor — pensado para actualizar algo ya instalado, no para crear estructura nueva desde cero.
+- **Fix real de fondo**: subir un `.content.xml` ahora lo interpreta localmente nodo por nodo (con sus propiedades y tipos — `{Boolean}`, `{Long}`, arreglos, mixins...) y lo reconstruye como una serie de POSTs normales de Sling, en vez de depender del "Import Operation" (`:contentType=xml`) que no entiende el formato Document View real de FileVault y devolvía HTTP 200 sin aplicar nada. Los diálogos de edición (`_cq_dialog`) se reemplazan por completo (los campos que borres del archivo también se borran en AEM); cualquier otro `.content.xml` solo crea/actualiza, nunca borra.
+- Barra de progreso cancelable con un canal de salida ("AEM Toolkit — Sync") que registra el resultado (✔/✘) de cada archivo.
+- **"AEM: Configurar credenciales de sincronización..."**: host/puerto de Author y Publish son configuración normal; la contraseña se guarda en VS Code Secret Storage, nunca en `settings.json`.
 
-```bash
-npm run package
-```
+### Detección automática del JDK requerido por el proyecto
+
+- **⚙️** en la barra de acciones rápidas del panel de Compilar: detectar el JDK de nuevo, configurar carpetas de búsqueda, configurar el JDK a mano, o abrir la configuración completa.
+- Lee la versión de Java que el proyecto requiere (`maven.compiler.release`/`target`/`source` o `java.version`) y, si no coincide con la del sistema, busca automáticamente una instalación que sí coincida en `aemToolkit.jdkSearchFolders` (hasta 2 carpetas "contenedoras" de varios JDKs) — sin preguntar nada si la encuentra. Si no puede resolverlo solo, avisa con un banner en el panel y pregunta antes de compilar si de todas formas quieres continuar.
+- `aemToolkit.javaHome` fija el JDK a mano para las Tasks de Maven de este proyecto (configuración de workspace, no toca nada global del sistema).
+
+### Editor visual de diálogos (Bloque 5/6 — MVP)
+
+- **"AEM: Editar diálogo..."** (clic derecho sobre `_cq_dialog` o su `.content.xml` en el Explorador) abre un panel dedicado con el diálogo como árbol visual editable: agregar, editar, reordenar y eliminar pestañas, agrupadores (fieldset) y campos.
+- **Catálogo de 20 tipos de campo** (labels en inglés — Textfield, Pathfield, Select, Checkbox, Switch, Multifield, Date picker, File upload, Tags, Heading, etc.), con editor dedicado por tipo (valor por defecto, opciones, ruta raíz, tipo de fecha, MIME types...). Cualquier campo de un tipo fuera del catálogo se conserva tal cual al guardar (no se destruye por no tener editor propio).
+- **Pestañas verdaderamente opcionales**: un diálogo sin pestañas se edita con sus campos planos directo en la raíz — nunca se envuelve forzosamente en una pestaña "General" sintética. Un botón dedicado las agrega cuando hace falta (moviendo los campos existentes a la primera automáticamente), sin poder anidar una segunda estructura de pestañas dentro de otra. Con más de una pestaña, cada campo se puede mover a otra con un clic (o eligiendo cuál, si hay más de dos).
+- **Multicampo (multifield)**: la propiedad real vive en su campo interno repetido (nunca en el contenedor — un bug de duplicado ahí fue la causa real del aviso de "valor repetido" al usarlo en AEM, corregido de fondo), y tanto crearlo como editar su campo interno (tipo, etiqueta, nombre de propiedad) queda cubierto.
+- **XML generado con formato propio**: abertura de etiqueta + primer atributo en la primera línea, atributos adicionales uno por línea indentados un nivel más, cierre de etiqueta siempre en su propia línea alineado con su abertura — nunca autocierre, incluso en nodos sin hijos.
+- **"AEM: Diálogo"** (nuevo acceso rápido, clic derecho **dentro del código** de un diálogo ya abierto): selector con los 5 tipos más usados — Textfield, Pathfield, Checkbox, Select, Multifield — más "Edición avanzada" para abrir el panel completo. Resuelve solo en qué pestaña insertar (pregunta solo si hay más de una) y ofrece subir el cambio a Author/Publish al toque.
+- **📋 "Copiar cómo usarlo"**, ícono en la fila de cada campo (a la izquierda de ✏️ Editar): copia al portapapeles la expresión HTL típica para leer esa propiedad (`${properties.nombre}`) con un comentario del tipo de dato esperado (String, Number, Boolean, Calendar, String[]...) — el tooltip muestra el texto exacto antes de copiarlo.
+- **Guardar**: escribe el `.content.xml` en disco y pregunta si se quiere subir el cambio ahora a Author/Publish. El estado de guardado se ve en rojo si falló, verde si salió bien.
+
+### "AEM: Formatear XML" — de propósito general
+
+- Aplica el mismo formato de indentación del editor de diálogos a **cualquier** `.xml` de Document View del proyecto (no solo diálogos): clic derecho sobre uno o varios `.xml` dentro de `jcr_root`. No reescribe el archivo si ya estaba formateado igual.
+- Detecta y preserva las namespaces reales del archivo original (más allá de las 4 estándar `jcr`/`sling`/`cq`/`nt`) para no perder namespaces propias (ej. `granite`) al reformatear.
+
+### Menús contextuales agrupados
+
+Todos los comandos anteriores quedan bajo un único submenú desplegable **"AEM Toolkit"** (con el ícono de la barra de actividad) tanto en el Explorador como dentro del código — en vez de aparecer como entradas sueltas mezcladas con el resto del menú contextual de VS Code.
+
+### Comandos
+
+- **AEM: Compilar proyecto...** / **AEM: Repetir última compilación** / **AEM: Mostrar información del proyecto detectado** / **AEM: Actualizar detección de proyecto** (Bloque 1, v1.0.0)
+- **AEM: Subir a Author** / **AEM: Subir a Publish** / **AEM: Configurar credenciales de sincronización...** (Bloque 2)
+- **AEM: Editar diálogo...** (Explorador) / **AEM: Diálogo** (acceso rápido, dentro del código) (Bloque 5/6)
+- **AEM: Formatear XML**
+
+### Configuración adicional (`aemToolkit.*`) sobre la de v1.0.0
+
+- `javaHome`, `jdkSearchFolders` — JDK del proyecto.
+- `sync.authorHost`/`authorPort`/`publishHost`/`publishPort`/`username` — destinos de sincronización (la contraseña vive en Secret Storage, no aquí).
+- `maxDialogTabs` — tope de pestañas al armar un diálogo.
+- `componentsCreateCssJsByDefault`, `defaultLocales`, `namespace`, `componentsUtilsPath` — ya configurables, preparados para los próximos bloques (creación de componentes/clientlibs/i18n, ver `FEATURES.md`) que todavía no están implementados.
+
+## Versión 3.0.0 (estable) — Bloque 3: Crear componente
+
+Tercera versión mayor estable. Sobre la base de la 2.0.0 (sincronización + editor visual de diálogos), suma todo lo construido a lo largo de la serie **2.1.0 → 2.1.12** (ver `CHANGELOG-2.0.0.md` para el detalle versión por versión): el asistente **"AEM: Crear componente..."** completo.
+
+### Crear componente (Bloque 3 — primera iteración; modelo Sling queda pendiente)
+
+- **"Crear nuevo..." → "Componente"**, clic derecho sobre cualquier carpeta dentro de `ui.apps`: formulario Webview con nombre (validado en vivo contra la convención del proyecto y la ruta resultante), título, grupo de componentes con autocompletado, switch de versionado, switches de estilos/JS con selector de preprocesador (autodetecta el dominante del proyecto, o pide elegir si están mezclados), switch "Añadir al módulo frontend" (si el proyecto tiene `ui.frontend`), y una sección de opciones avanzadas (`_cq_editConfig.xml` de refresco automático, `_cq_design_dialog`, `_cq_template`, placeholder de autoría, apertura automática de estilos/HTML/diálogo al crear).
+- **Esquema de versionado "proxy"** (patrón estándar de Adobe): `components/<nombre>` es un proxy sin versión (`sling:resourceSuperType` apuntando a la versión vigente); la implementación real vive en `components/<nombre>/v1`, `v2`... — el proxy se reescribe para apuntar a la versión nueva cada vez que se agrega una.
+- **Clic derecho directamente sobre un componente ya existente** resuelve sin pasar por el formulario: si no está versionado, ofrece convertirlo en variante (mueve su contenido a `v1`, lo convierte en proxy y duplica `v1` en `v2`); si ya está versionado, ofrece crear directamente la siguiente versión (duplicando la más alta existente y reescribiendo solo el `sling:resourceSuperType` del proxy).
+- **Clientlib consciente de `ui.frontend`**: con frontend activo, los estilos/JS se generan en `ui.frontend/src/main/webpack/components/<nombre>` (o en las 2 carpetas independientes que el usuario elija por separado) y la extensión intenta registrarlos sola en el entrypoint de webpack; sin frontend, se crea una clientlib clásica en `ui.apps` (`clientlibs/clientlib-components/<nombre>`, con CSS y JS en su propia subcarpeta), embebida inline en el HTL con el patrón `clientlib.html` de AEM Core Components — compartida entre todas las versiones de un mismo componente, y nunca sobrescrita si ya existía contenido personalizado ahí.
+- **Carpeta de estilos/JS totalmente personalizable**: campo de texto + explorador de carpetas **embebido dentro del propio panel** (no el selector nativo del sistema operativo), confinado a la carpeta raíz del proyecto actual. Con `ui.frontend` y estilos+JS ambos activos, un switch adicional permite editar la ruta de estilos y la de JS de forma independiente (por defecto ambas reflejan la misma carpeta base).
+- Todo el XML generado (`.content.xml`, `_cq_dialog`, `_cq_editConfig.xml`, `_cq_design_dialog`, `_cq_template`, clientlib clásica) se escribe ya formateado con el mismo estilo que usa "AEM: Formatear XML".
+- El estilo generado arranca con la clase raíz en BEM `.<nombre>-cmp`, ya conectada al elemento raíz del `.html`.
+- **Pendiente para una siguiente iteración**: modelo Sling (con/sin modelo) y el componente React/Angular del Bloque 4, que depende de este.
+
+### Comandos
+
+- **AEM: Crear componente...** (submenú "Crear nuevo..." dentro de "AEM Toolkit", clic derecho sobre cualquier carpeta de `ui.apps`) (Bloque 3)
+
+### Configuración adicional (`aemToolkit.*`) sobre la de v2.0.0
+
+- `componentsCreateCssJsByDefault` — genera CSS/JS sin preguntar cada vez al crear un componente.
+- `componentsUtilsPath`, `defaultLocales`, `namespace` — ya configurables, preparados para los próximos bloques (i18n, tags, CF Model...) que todavía no están implementados.
+

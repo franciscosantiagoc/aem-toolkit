@@ -91,7 +91,7 @@ export function renderComponentPanelHtml(state: ComponentPanelInitialState): str
 </head>
 <body>
   <h2>Crear componente</h2>
-  <div class="hint">Bloque 17 — primera iteración: estructura, diálogo vacío y clientlib de estilos/JS. El modelo Sling queda para una iteración siguiente.</div>
+  <div class="hint">Bloque 3 — primera iteración: estructura, diálogo vacío y clientlib de estilos/JS. El modelo Sling queda para una iteración siguiente.</div>
 
   <label>Nombre técnico del componente</label>
   <input type="text" id="name" placeholder="ej. hero-banner" />
