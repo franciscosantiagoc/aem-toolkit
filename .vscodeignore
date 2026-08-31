@@ -11,5 +11,3 @@ node_modules/**
 !node_modules/fast-xml-parser/**
 !node_modules/strnum/**
 FEATURES.md
-CHANGELOG.md
-CHANGELOG-*.md
