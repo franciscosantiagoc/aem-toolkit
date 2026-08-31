@@ -1,0 +1,337 @@
+{
+  "name": "aem-toolkit",
+  "displayName": "AEM Toolkit",
+  "description": "Compila, sincroniza y genera componentes/modelos/servlets/diálogos para proyectos AEM (arquetipo Maven: core/ui.apps/ui.content/ui.frontend/dispatcher) desde el menú contextual del Explorador.",
+  "version": "3.0.0",
+  "publisher": "local-dev",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://local/extensiones-visual-studio"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "aem",
+    "adobe experience manager",
+    "sling",
+    "htl",
+    "sightly",
+    "maven"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/pom.xml"
+  ],
+  "main": "./out/extension.js",
+  "icon": "media/extension-icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aemToolkit",
+          "title": "AEM Toolkit",
+          "icon": "media/activitybar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aemToolkit": [
+        {
+          "id": "aemToolkitView",
+          "name": "Acciones"
+        },
+        {
+          "id": "aemToolkitCompileView",
+          "name": "Compilar",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "aemToolkit.compile",
+        "title": "AEM: Compilar proyecto...",
+        "category": "AEM Toolkit",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "aemToolkit.compileRepeatLast",
+        "title": "AEM: Repetir última compilación",
+        "category": "AEM Toolkit",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "aemToolkit.refreshProjectInfo",
+        "title": "AEM: Actualizar detección de proyecto",
+        "category": "AEM Toolkit",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aemToolkit.showProjectInfo",
+        "title": "AEM: Mostrar información del proyecto detectado",
+        "category": "AEM Toolkit",
+        "icon": "$(info)"
+      },
+      {
+        "command": "aemToolkit.syncToAuthor",
+        "title": "AEM: Subir a Author",
+        "category": "AEM Toolkit",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "aemToolkit.syncToPublish",
+        "title": "AEM: Subir a Publish",
+        "category": "AEM Toolkit",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "aemToolkit.configureSyncCredentials",
+        "title": "AEM: Configurar credenciales de sincronización...",
+        "category": "AEM Toolkit",
+        "icon": "$(key)"
+      },
+      {
+        "command": "aemToolkit.editDialog",
+        "title": "AEM: Editar diálogo...",
+        "category": "AEM Toolkit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "aemToolkit.dialogQuickAdd",
+        "title": "AEM: Diálogo",
+        "category": "AEM Toolkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "aemToolkit.formatXml",
+        "title": "AEM: Formatear XML",
+        "category": "AEM Toolkit",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "aemToolkit.createComponent",
+        "title": "AEM: Crear componente...",
+        "category": "AEM Toolkit",
+        "icon": "$(new-folder)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "aemToolkit.explorerMenu",
+        "label": "AEM Toolkit",
+        "icon": "media/activitybar-icon.svg"
+      },
+      {
+        "id": "aemToolkit.editorMenu",
+        "label": "AEM Toolkit",
+        "icon": "media/activitybar-icon.svg"
+      },
+      {
+        "id": "aemToolkit.createMenu",
+        "label": "Crear nuevo...",
+        "icon": "$(add)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "submenu": "aemToolkit.explorerMenu",
+          "group": "aemToolkit@1"
+        }
+      ],
+      "aemToolkit.explorerMenu": [
+        {
+          "command": "aemToolkit.compile",
+          "when": "explorerResourceIsFolder && resourceFilename =~ /^(ui\\.frontend|core|ui\\.apps|ui\\.content|all)$/",
+          "group": "1_build@1"
+        },
+        {
+          "command": "aemToolkit.syncToAuthor",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "2_sync@1"
+        },
+        {
+          "command": "aemToolkit.syncToPublish",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "2_sync@2"
+        },
+        {
+          "command": "aemToolkit.editDialog",
+          "when": "resourceFilename == '_cq_dialog' || (resourceFilename == '.content.xml' && resourcePath =~ /_cq_dialog/)",
+          "group": "3_dialog@1"
+        },
+        {
+          "command": "aemToolkit.formatXml",
+          "when": "resourceExtname == '.xml' && resourcePath =~ /jcr_root/",
+          "group": "4_format@1"
+        },
+        {
+          "submenu": "aemToolkit.createMenu",
+          "when": "explorerResourceIsFolder && resourcePath =~ /jcr_root/ && resourcePath =~ /ui\\.apps/",
+          "group": "5_create@1"
+        }
+      ],
+      "aemToolkit.createMenu": [
+        {
+          "command": "aemToolkit.createComponent",
+          "group": "1_create@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "submenu": "aemToolkit.editorMenu",
+          "group": "aemToolkit@1"
+        }
+      ],
+      "aemToolkit.editorMenu": [
+        {
+          "command": "aemToolkit.syncToAuthor",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "1_sync@1"
+        },
+        {
+          "command": "aemToolkit.syncToPublish",
+          "when": "resourcePath =~ /jcr_root/",
+          "group": "1_sync@2"
+        },
+        {
+          "command": "aemToolkit.dialogQuickAdd",
+          "when": "resourceFilename == '_cq_dialog' || (resourceFilename == '.content.xml' && resourcePath =~ /_cq_dialog/)",
+          "group": "2_dialog@1"
+        },
+        {
+          "command": "aemToolkit.formatXml",
+          "when": "resourceExtname == '.xml' && resourcePath =~ /jcr_root/",
+          "group": "3_format@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "aemToolkit.refreshProjectInfo",
+          "when": "view == aemToolkitView",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": []
+    },
+    "configuration": {
+      "title": "AEM Toolkit",
+      "properties": {
+        "aemToolkit.mavenExecutable": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "mvn",
+            "mvnw"
+          ],
+          "default": "auto",
+          "description": "Ejecutable de Maven a usar. 'auto' usa './mvnw' (o '.\\mvnw.cmd' en Windows) si existe en la raíz del proyecto, y si no, cae a 'mvn' del PATH."
+        },
+        "aemToolkit.frontBuildCommand": {
+          "type": "string",
+          "default": "npm run dev",
+          "description": "Comando ejecutado dentro de 'ui.frontend' cuando el ámbito de compilación es 'Solo Front'. Por defecto 'npm run dev' (sin minificar) para que el CSS/JS generado sea fácil de debuggear; cambia a 'npm run prod' si prefieres el build minificado."
+        },
+        "aemToolkit.compilePresets": {
+          "type": "array",
+          "default": [],
+          "description": "Modos de compilación personalizados guardados desde el panel 'AEM: Compilar proyecto...' (nombre, modo base, perfiles marcados, skip tests de front/back, destino Author/Publish, argumentos extra). Se administran también desde ese mismo panel.",
+          "items": {
+            "type": "object"
+          }
+        },
+        "aemToolkit.componentsCreateCssJsByDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "Al crear un componente, genera archivos CSS/JS (o SASS/LESS) sin preguntar cada vez. Desactívalo para que el asistente de creación de componentes siempre pregunte."
+        },
+        "aemToolkit.maxDialogTabs": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Número máximo de pestañas (tabs) que se pueden crear al armar un diálogo de componente con pestañas."
+        },
+        "aemToolkit.defaultLocales": {
+          "type": "array",
+          "default": [],
+          "description": "Idiomas ofrecidos por defecto en el modal de i18n. Vacío = se autodetectan de las carpetas 'i18n/<idioma>' del proyecto.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "aemToolkit.namespace": {
+          "type": "string",
+          "default": "",
+          "description": "Namespace de la app AEM (carpeta bajo /apps y bajo core/.../<empresa>/<proyecto>). Vacío = se autodetecta leyendo ui.apps/src/main/content/jcr_root/apps."
+        },
+        "aemToolkit.componentsUtilsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Ruta (relativa a ui.apps/src/main/content/jcr_root/apps/<namespace>/components) donde viven los data-sly-template compartidos. Vacío = 'utils'."
+        },
+        "aemToolkit.javaHome": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "Ruta al JDK que debe usar Maven al compilar (ej. 'C:\\\\Program Files\\\\Java\\\\jdk-17'). Config. de workspace: aplica solo a este proyecto. Vacío = detección automática (ver aemToolkit.jdkSearchFolders) o el JDK por defecto del sistema."
+        },
+        "aemToolkit.jdkSearchFolders": {
+          "type": "array",
+          "scope": "resource",
+          "maxItems": 2,
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Hasta 2 carpetas que contienen varias instalaciones de JDK (ej. 'C:\\\\Program Files\\\\Java', con subcarpetas jdk-11, jdk-17...). Si el proyecto necesita una versión de Java distinta a la del sistema, la extensión busca aquí una que coincida antes de preguntar. Config. de workspace."
+        },
+        "aemToolkit.sync.authorHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Host de la instancia AEM Author usada por 'AEM: Subir a Author'."
+        },
+        "aemToolkit.sync.authorPort": {
+          "type": "string",
+          "default": "4502",
+          "description": "Puerto de la instancia AEM Author usada por 'AEM: Subir a Author'."
+        },
+        "aemToolkit.sync.publishHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Host de la instancia AEM Publish usada por 'AEM: Subir a Publish'."
+        },
+        "aemToolkit.sync.publishPort": {
+          "type": "string",
+          "default": "4503",
+          "description": "Puerto de la instancia AEM Publish usada por 'AEM: Subir a Publish'."
+        },
+        "aemToolkit.sync.username": {
+          "type": "string",
+          "default": "admin",
+          "description": "Usuario compartido para autenticar la sincronización contra Author y Publish. La contraseña NO se guarda aquí: se configura por separado con 'AEM: Configurar credenciales de sincronización...' y se almacena de forma segura en VS Code Secret Storage."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.7"
+  }
+}

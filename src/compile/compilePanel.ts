@@ -1,0 +1,1032 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { AemProjectInfo, detectAemProjectsInWorkspace } from '../core/projectDetector';
+import { getConfig, saveCompilePreset, deleteCompilePreset, CompilePreset, BaseCompileMode } from '../config';
+import { buildMavenCommand, buildFrontendCommand, runAsTask, resolveDeployArgs, DeployTarget, stopCurrentTask, wasLastRunCancelled, buildJavaEnv } from './compileRunner';
+import { resolveJavaForProject, JavaResolution, describeJavaStatus, getJavaWarningBanner } from './javaResolver';
+import { hasUncommittedChangesIn } from '../core/gitInfo';
+import { addJacocoProfile } from '../coverage/jacocoSetup';
+import { collectBackendCoverage } from '../coverage/jacocoParser';
+import { collectFrontendCoverage } from '../coverage/istanbulParser';
+import { showCoveragePanel } from '../coverage/coveragePanel';
+
+const LAST_RUN_KEY = 'aemToolkit.lastCompileRun';
+
+export interface ResolvedRun {
+  baseMode: BaseCompileMode;
+  profiles: string[];
+  skipFrontendTests: boolean;
+  skipBackendTests: boolean;
+  deploy: DeployTarget;
+  extraArgs: string;
+}
+
+interface LastRun {
+  rootPath: string;
+  run: ResolvedRun;
+}
+
+export async function pickProject(): Promise<AemProjectInfo | undefined> {
+  const projects = detectAemProjectsInWorkspace();
+  if (projects.length === 0) {
+    vscode.window.showErrorMessage(
+      'AEM Toolkit no encontró ningún proyecto AEM (pom.xml con <modules>) en las carpetas abiertas. Abre la carpeta del proyecto (o la carpeta que lo contiene) e inténtalo de nuevo.'
+    );
+    return undefined;
+  }
+  if (projects.length === 1) return projects[0];
+
+  const picked = await vscode.window.showQuickPick(
+    projects.map((p) => ({
+      label: p.namespace ?? p.rootPath.split(/[\\/]/).pop() ?? p.rootPath,
+      description: p.rootPath,
+      detail: `Módulos: ${p.modules.join(', ')}${p.hasFrontendModule ? '' : ' (sin ui.frontend)'}`,
+      project: p
+    })),
+    { placeHolder: 'Se detectaron varios proyectos AEM — escribe para filtrar y elige uno', matchOnDescription: true, matchOnDetail: true }
+  );
+  return picked?.project;
+}
+
+function findProjectByRoot(rootPath: string): AemProjectInfo | undefined {
+  return detectAemProjectsInWorkspace().find((p) => p.rootPath === rootPath);
+}
+
+function resolveJava(project: AemProjectInfo, config: ReturnType<typeof getConfig>): JavaResolution {
+  return resolveJavaForProject({
+    requiredMajor: project.requiredJavaVersion,
+    manualJavaHome: config.javaHome,
+    jdkSearchFolders: config.jdkSearchFolders
+  });
+}
+
+/** Antes de lanzar una Task de Maven, si se detectó un choque real entre el Java que requiere el
+ * proyecto y el que resolvería el sistema (sin que la extensión haya podido resolverlo sola),
+ * confirma con el usuario si de todas formas quiere seguir — en vez de dejar que Maven falle con
+ * un error críptico de "UnsupportedClassVersionError" sin ninguna pista de por qué. */
+async function confirmProceedDespiteJavaMismatch(resolution: JavaResolution): Promise<boolean> {
+  if (!resolution.mismatch) return true;
+  const choice = await vscode.window.showWarningMessage(
+    `El proyecto requiere Java ${resolution.requiredMajor} pero el sistema tiene Java ${resolution.systemMajor}. ¿Deseas continuar de todas formas?`,
+    { modal: true },
+    'Continuar',
+    'Configurar JDK...'
+  );
+  if (choice === 'Configurar JDK...') {
+    await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', { query: 'aemToolkit.jdkSearchFolders' });
+    return false;
+  }
+  return choice === 'Continuar';
+}
+
+export async function executeResolvedRun(context: vscode.ExtensionContext, project: AemProjectInfo, run: ResolvedRun): Promise<void> {
+  const config = getConfig(vscode.Uri.file(project.rootPath));
+  const javaResolution = resolveJava(project, config);
+  const javaEnv = buildJavaEnv(javaResolution.resolvedHome ?? '');
+  await context.workspaceState.update(LAST_RUN_KEY, { rootPath: project.rootPath, run } as LastRun);
+
+  if (run.baseMode === 'full') {
+    if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
+    const { profiles, extraArgs: deployArgs } = resolveDeployArgs(project, run.profiles, run.deploy);
+    const combinedExtra = [deployArgs, run.extraArgs].filter(Boolean).join(' ');
+    const { cwd, command } = buildMavenCommand(project, config, { profiles, skipTests: run.skipBackendTests, extraArgs: combinedExtra });
+    const exit = await runAsTask(cwd, command, 'AEM: Compilar (Completa)', javaEnv);
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Compilación completa detenida por el usuario.');
+      return;
+    }
+    if (exit !== 0) {
+      vscode.window.showErrorMessage(`La compilación completa terminó con errores (código ${exit}). Revisa la terminal.`);
+      return;
+    }
+    if (project.hasFrontendModule && project.frontendTestScript && !run.skipFrontendTests) {
+      const frontCmd = buildFrontendCommand(project, `npm run ${project.frontendTestScript}`);
+      const frontExit = await runAsTask(frontCmd.cwd, frontCmd.command, 'AEM: Tests de Front');
+      if (wasLastRunCancelled()) {
+        vscode.window.showWarningMessage('⏹ Tests de front detenidos por el usuario (el build completo sí terminó).');
+        return;
+      }
+      if (frontExit !== 0) {
+        vscode.window.showWarningMessage(`El build completo terminó bien, pero los tests de front fallaron (código ${frontExit}).`);
+        return;
+      }
+    }
+    vscode.window.showInformationMessage('✔ Compilación completa terminada correctamente.');
+    return;
+  }
+
+  if (run.baseMode === 'front') {
+    const { cwd, command } = buildFrontendCommand(project, config.frontBuildCommand);
+    const exit = await runAsTask(cwd, command, 'AEM: Compilar (Solo Front)');
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Build de front detenido por el usuario.');
+      return;
+    }
+    if (exit !== 0) {
+      vscode.window.showErrorMessage(`El build de front terminó con errores (código ${exit}).`);
+      return;
+    }
+    if (project.frontendTestScript && !run.skipFrontendTests) {
+      const testCmd = buildFrontendCommand(project, `npm run ${project.frontendTestScript}`);
+      const testExit = await runAsTask(testCmd.cwd, testCmd.command, 'AEM: Tests de Front');
+      if (wasLastRunCancelled()) {
+        vscode.window.showWarningMessage('⏹ Tests de front detenidos por el usuario (el build sí terminó).');
+        return;
+      }
+      if (testExit !== 0) {
+        vscode.window.showWarningMessage(`El build de front terminó bien, pero los tests fallaron (código ${testExit}).`);
+        return;
+      }
+    }
+    vscode.window.showInformationMessage('✔ Build de front terminado correctamente.');
+    return;
+  }
+
+  if (run.baseMode === 'back') {
+    if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
+    const { profiles, extraArgs: deployArgs } = resolveDeployArgs(project, run.profiles, run.deploy);
+    const combinedExtra = [deployArgs, run.extraArgs].filter(Boolean).join(' ');
+    const { cwd, command } = buildMavenCommand(project, config, {
+      profiles,
+      skipTests: run.skipBackendTests,
+      extraArgs: combinedExtra,
+      excludeFrontend: true
+    });
+    const exit = await runAsTask(cwd, command, 'AEM: Compilar (Solo Back)', javaEnv);
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Compilación del back detenida por el usuario.');
+    } else if (exit === 0) {
+      vscode.window.showInformationMessage('✔ Back compilado correctamente.');
+    } else {
+      vscode.window.showErrorMessage(`El back terminó con errores (código ${exit}).`);
+    }
+    return;
+  }
+
+  if (run.baseMode === 'coverage-front') {
+    if (!project.frontendCoverageScript) {
+      vscode.window.showWarningMessage(
+        'Este proyecto no tiene un script de coverage en ui.frontend/package.json (ej. un script que corra con --coverage). Agrégalo primero y vuelve a intentar.'
+      );
+      return;
+    }
+    const { cwd, command } = buildFrontendCommand(project, `npm run ${project.frontendCoverageScript}`);
+    const exit = await runAsTask(cwd, command, 'AEM: Coverage Front');
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage('⏹ Tests de front (coverage) detenidos por el usuario.');
+      return;
+    }
+    if (exit !== 0) {
+      vscode.window.showErrorMessage(`Los tests de front fallaron (código ${exit}) — no se generó el coverage.`);
+      return;
+    }
+    const rows = collectFrontendCoverage(project.rootPath).map((f) => ({
+      name: path.basename(f.filePath),
+      group: path.dirname(f.filePath),
+      pct: f.linesPct
+    }));
+    if (rows.length === 0) {
+      vscode.window.showWarningMessage(
+        'No se encontró ui.frontend/coverage/coverage-summary.json — revisa que el reporter "json-summary" esté configurado en tu herramienta de test.'
+      );
+      return;
+    }
+    showCoveragePanel(`Coverage Frontend — ${project.namespace ?? ''}`, rows);
+    return;
+  }
+
+  // coverage-back
+  if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
+  const backendModules = project.modules.filter((m) => m !== 'ui.frontend');
+  if (!project.hasJacoco) {
+    const choice = await vscode.window.showWarningMessage(
+      'Este proyecto no tiene jacoco-maven-plugin configurado todavía. AEM Toolkit puede agregar automáticamente un perfil "coverage" al pom raíz (heredado por todos los módulos, igual que autoInstallBundle/Package).',
+      'Agregar automáticamente',
+      'Cancelar'
+    );
+    if (choice !== 'Agregar automáticamente') return;
+    const ok = addJacocoProfile(project.rootPath);
+    if (!ok) {
+      vscode.window.showErrorMessage('No se pudo agregar el perfil de coverage automáticamente. Agrégalo manualmente al pom.xml raíz.');
+      return;
+    }
+    vscode.window.showInformationMessage('Perfil "coverage" agregado al pom raíz. Usa "AEM: Actualizar detección de proyecto" si no lo ves reflejado.');
+  }
+
+  const profiles = [...new Set([...run.profiles, 'coverage'])];
+  const changed = hasUncommittedChangesIn(project.rootPath, backendModules);
+  const goal = changed ? 'clean install' : 'test';
+  const { cwd, command } = buildMavenCommand(project, config, {
+    goal,
+    profiles,
+    skipTests: false,
+    extraArgs: run.extraArgs,
+    excludeFrontend: true
+  });
+  const label = changed ? 'AEM: Coverage Back (build completo)' : 'AEM: Coverage Back (solo tests)';
+  const exit = await runAsTask(cwd, command, label, javaEnv);
+  if (wasLastRunCancelled()) {
+    vscode.window.showWarningMessage('⏹ Tests de back (coverage) detenidos por el usuario.');
+    return;
+  }
+  if (exit !== 0) {
+    vscode.window.showErrorMessage(`Los tests de back fallaron (código ${exit}) — revisa el reporte antes de confiar en el coverage.`);
+    return;
+  }
+  const rows = collectBackendCoverage(project.rootPath, project.modules).map((c) => ({
+    name: c.className.split('.').pop() ?? c.className,
+    group: c.packageName,
+    pct: c.linePct
+  }));
+  if (rows.length === 0) {
+    vscode.window.showWarningMessage('No se encontró ningún reporte target/site/jacoco/jacoco.xml — revisa que el perfil "coverage" se haya aplicado.');
+    return;
+  }
+  showCoveragePanel(
+    `Coverage Backend — ${project.namespace ?? ''}${changed ? ' (build completo, había cambios)' : ' (solo tests, sin cambios desde el último commit)'}`,
+    rows
+  );
+}
+
+export type QuickActionId =
+  | 'compileWithTests'
+  | 'downloadDependencies'
+  | 'generateSources'
+  | 'compileSkipTests'
+  | 'clean'
+  | 'dependencyTree'
+  | 'analyzeDependencies';
+
+export interface QuickActionPayload {
+  action: QuickActionId;
+  profiles: string[];
+}
+
+/**
+ * Barra de "Acciones rápidas" del panel, al estilo de los íconos de la ventana de Maven de
+ * IntelliJ. Son acciones Maven puntuales (no pasan por el select de Modo) que usan los perfiles
+ * que estén marcados en ese momento en la sección de checkboxes. La mayoría, igual que "Solo
+ * Back", excluyen ui.frontend del reactor (-pl !ui.frontend -am) — las excepciones son ▶ "Compilar"
+ * y ⚡ "Compilar sin tests", que corren el reactor completo (con y sin tests respectivamente),
+ * igual que el par ▶/⊘ del panel Maven de IntelliJ: ambos ejecutan los perfiles marcados, uno con
+ * tests y el otro saltándolos (back y front).
+ */
+export async function executeQuickAction(project: AemProjectInfo, payload: QuickActionPayload): Promise<void> {
+  const config = getConfig(vscode.Uri.file(project.rootPath));
+  const javaResolution = resolveJava(project, config);
+  const javaEnv = buildJavaEnv(javaResolution.resolvedHome ?? '');
+  if (!(await confirmProceedDespiteJavaMismatch(javaResolution))) return;
+  const profiles = payload.profiles ?? [];
+
+  const runGoal = async (goal: string, label: string, opts?: { skipTests?: boolean; excludeFrontend?: boolean }) => {
+    const { cwd, command } = buildMavenCommand(project, config, {
+      goal,
+      profiles,
+      skipTests: opts?.skipTests ?? false,
+      extraArgs: '',
+      excludeFrontend: opts?.excludeFrontend ?? true
+    });
+    return runAsTask(cwd, command, label, javaEnv);
+  };
+
+  // "Descargar dependencias"/"Generar sources"/"Analizar dependencias" excluyen ui.frontend del
+  // reactor (igual que "Solo Back") — en un proyecto recién clonado, si algún otro módulo depende
+  // del artefacto de ui.frontend (o de otro hermano, ej. "core") y ese hermano nunca se compiló ni
+  // se instaló en el repositorio Maven local, Maven no puede resolver esa dependencia y falla con
+  // "Could not resolve dependencies...". No es un bug de la extensión: es la limitación conocida de
+  // invocar un goal suelto (no parte del ciclo de vida) contra un reactor multi-módulo sin artefactos
+  // previos. Se avisa con una pista accionable en vez de solo mostrar el código de salida.
+  const FRESH_CHECKOUT_HINT =
+    ' Si este es un proyecto recién clonado, es normal: un módulo hermano (ej. "ui.frontend" o "core") probablemente todavía no está compilado ni instalado en tu repositorio Maven local. Corre "▶ Compilar" (modo "Completa") una vez primero — después esta acción funcionará normalmente.';
+
+  // Todas las acciones rápidas terminan con el mismo patrón: correr un goal y avisar el resultado
+  // — distinguiendo una cancelación manual (⏹, código undefined) de un error real.
+  const reportGoalResult = (exit: number | undefined, cancelledMessage: string, successMessage: string, errorMessage: (exit: number | undefined) => string) => {
+    if (wasLastRunCancelled()) {
+      vscode.window.showWarningMessage(`⏹ ${cancelledMessage}`);
+      return;
+    }
+    if (exit === 0) vscode.window.showInformationMessage(successMessage);
+    else vscode.window.showErrorMessage(errorMessage(exit));
+  };
+
+  switch (payload.action) {
+    case 'compileWithTests': {
+      const exit = await runGoal('clean install', 'AEM: Compilar (perfiles marcados, con tests)', {
+        skipTests: false,
+        excludeFrontend: false
+      });
+      reportGoalResult(
+        exit,
+        'Compilación detenida por el usuario.',
+        '✔ Compilado (con tests).',
+        (e) => `La compilación terminó con errores (código ${e}).`
+      );
+      return;
+    }
+    case 'downloadDependencies': {
+      const exit = await runGoal('dependency:resolve', 'AEM: Descargar dependencias');
+      reportGoalResult(
+        exit,
+        'Descarga de dependencias detenida por el usuario.',
+        '✔ Dependencias descargadas/resueltas.',
+        (e) => `No se pudieron resolver todas las dependencias (código ${e}).${FRESH_CHECKOUT_HINT}`
+      );
+      return;
+    }
+    case 'generateSources': {
+      const exit = await runGoal('generate-sources', 'AEM: Generar sources');
+      reportGoalResult(
+        exit,
+        'Generación de sources detenida por el usuario.',
+        '✔ Sources generados y carpetas actualizadas.',
+        (e) => `Falló la generación de sources (código ${e}).${FRESH_CHECKOUT_HINT}`
+      );
+      return;
+    }
+    case 'compileSkipTests': {
+      const exit = await runGoal('clean install', 'AEM: Compilar (perfiles marcados, sin tests de back ni front)', {
+        skipTests: true,
+        excludeFrontend: false
+      });
+      reportGoalResult(
+        exit,
+        'Compilación detenida por el usuario.',
+        '✔ Compilado (tests salteados en back y front).',
+        (e) => `La compilación terminó con errores (código ${e}).`
+      );
+      return;
+    }
+    case 'clean': {
+      const exit = await runGoal('clean', 'AEM: Limpiar (clean)');
+      reportGoalResult(
+        exit,
+        'Limpieza (clean) detenida por el usuario.',
+        '✔ Proyecto limpiado.',
+        (e) => `El clean terminó con errores (código ${e}).`
+      );
+      return;
+    }
+    case 'dependencyTree': {
+      await runGoal('dependency:tree', 'AEM: Árbol de dependencias');
+      if (wasLastRunCancelled()) vscode.window.showWarningMessage('⏹ Árbol de dependencias detenido por el usuario.');
+      return;
+    }
+    case 'analyzeDependencies': {
+      const exit = await runGoal('dependency:analyze', 'AEM: Analizar dependencias');
+      if (wasLastRunCancelled()) {
+        vscode.window.showWarningMessage('⏹ Análisis de dependencias detenido por el usuario.');
+        return;
+      }
+      if (exit === 0) vscode.window.showInformationMessage('✔ Análisis de dependencias terminado — revisa el reporte en la terminal (usadas sin declarar / declaradas sin usar).');
+      else vscode.window.showWarningMessage(`El análisis de dependencias terminó con código ${exit} — revisa la terminal.${FRESH_CHECKOUT_HINT}`);
+      return;
+    }
+  }
+}
+
+export async function repeatLastCompile(context: vscode.ExtensionContext): Promise<void> {
+  const last = context.workspaceState.get<LastRun>(LAST_RUN_KEY);
+  if (!last) {
+    vscode.window.showWarningMessage('Todavía no has compilado nada en esta sesión. Usa "AEM: Compilar proyecto..." primero.');
+    return;
+  }
+  const project = findProjectByRoot(last.rootPath);
+  if (!project) {
+    vscode.window.showErrorMessage('No se pudo volver a detectar el proyecto de la última compilación.');
+    return;
+  }
+  await executeResolvedRun(context, project, last.run);
+}
+
+/**
+ * Panel de compilación anclado en la barra lateral (mismo contenedor de actividad que el árbol de
+ * acciones), en vez de una pestaña de editor aparte. VS Code solo "resuelve" (crea) la webview la
+ * primera vez que el usuario la hace visible; hasta entonces mostramos un estado vacío con un botón
+ * para elegir proyecto, para no disparar el QuickPick de proyectos sin que el usuario lo haya pedido.
+ */
+export class CompileViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'aemToolkitCompileView';
+
+  private view?: vscode.WebviewView;
+  private project?: AemProjectInfo;
+  private busy = false;
+
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  resolveWebviewView(webviewView: vscode.WebviewView): void {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+
+    webviewView.webview.onDidReceiveMessage(async (msg: any) => {
+      if (msg.type === 'pickProject') {
+        await this.pickAndLoadProject();
+        return;
+      }
+      if (msg.type === 'stopTask') {
+        stopCurrentTask();
+        return;
+      }
+      if (!this.project) return;
+      if (msg.type === 'configureJdk') {
+        await this.openJdkMenu();
+        return;
+      }
+      if (msg.type === 'run') {
+        await this.runBusy(() => executeResolvedRun(this.context, this.project!, msg.payload as ResolvedRun));
+        return;
+      }
+      if (msg.type === 'quickAction') {
+        await this.runBusy(() => executeQuickAction(this.project!, msg.payload as QuickActionPayload));
+        return;
+      }
+      if (msg.type === 'savePreset') {
+        const preset = msg.payload as CompilePreset;
+        if (!preset.name || !preset.name.trim()) {
+          vscode.window.showWarningMessage('Ponle un nombre al modo antes de guardarlo.');
+          return;
+        }
+        await saveCompilePreset(preset, vscode.Uri.file(this.project.rootPath));
+        vscode.window.showInformationMessage(`Modo "${preset.name}" guardado.`);
+        this.refreshHtml();
+        return;
+      }
+      if (msg.type === 'deletePreset') {
+        await deleteCompilePreset(msg.name as string, vscode.Uri.file(this.project.rootPath));
+        this.refreshHtml();
+        return;
+      }
+    });
+
+    if (this.project) {
+      this.refreshHtml();
+    } else {
+      webviewView.webview.html = renderEmptyHtml();
+    }
+  }
+
+  /** Invocado por el comando "AEM: Compilar proyecto..." — trae la vista al frente y (re)elige el proyecto. */
+  async show(): Promise<void> {
+    await vscode.commands.executeCommand(`${CompileViewProvider.viewType}.focus`);
+    await this.pickAndLoadProject();
+  }
+
+  private async pickAndLoadProject(): Promise<void> {
+    const project = await pickProject();
+    if (!project) {
+      if (this.view) webviewShowEmpty(this.view);
+      return;
+    }
+    this.project = project;
+    this.refreshHtml();
+  }
+
+  private refreshHtml(): void {
+    if (!this.view || !this.project) return;
+    const config = getConfig(vscode.Uri.file(this.project.rootPath));
+    const javaBanner = getJavaWarningBanner(resolveJava(this.project, config));
+    this.view.webview.html = renderPanelHtml(this.project, config.compilePresets, javaBanner);
+  }
+
+  /** Menú del ícono ⚙️: detectar de nuevo, configurar carpetas de búsqueda de JDKs (máx. 2),
+   * configurar el JDK a mano, o abrir de una vez la configuración completa de la extensión. */
+  private async openJdkMenu(): Promise<void> {
+    if (!this.project) return;
+    const rootUri = vscode.Uri.file(this.project.rootPath);
+    const config = getConfig(rootUri);
+    const cfg = vscode.workspace.getConfiguration('aemToolkit', rootUri);
+
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: '$(refresh) Detectar JDK ahora', action: 'detect' as const },
+        { label: '$(folder-opened) Configurar carpetas de búsqueda de JDKs (máx. 2)...', action: 'folders' as const },
+        { label: '$(tools) Configurar JDK manualmente...', action: 'manual' as const },
+        { label: '$(gear) Abrir configuración completa de la extensión', action: 'openSettings' as const }
+      ],
+      { placeHolder: describeJavaStatus(resolveJava(this.project, config)), matchOnDescription: true }
+    );
+    if (!picked) return;
+
+    switch (picked.action) {
+      case 'detect': {
+        vscode.window.showInformationMessage(describeJavaStatus(resolveJava(this.project, getConfig(rootUri))));
+        this.refreshHtml();
+        return;
+      }
+      case 'folders': {
+        const current = config.jdkSearchFolders;
+        const first = await vscode.window.showInputBox({
+          title: 'Carpeta contenedora de JDKs #1',
+          value: current[0] ?? '',
+          placeHolder: 'ej. C:\\Program Files\\Java (contiene subcarpetas jdk-11, jdk-17, ...)'
+        });
+        if (first === undefined) return;
+        const second = await vscode.window.showInputBox({
+          title: 'Carpeta contenedora de JDKs #2 (opcional)',
+          value: current[1] ?? '',
+          placeHolder: 'Déjala vacía si no necesitas una segunda'
+        });
+        if (second === undefined) return;
+        const folders = [first, second].map((f) => f.trim()).filter(Boolean).slice(0, 2);
+        await cfg.update('jdkSearchFolders', folders, vscode.ConfigurationTarget.Workspace);
+        vscode.window.showInformationMessage('Carpetas de búsqueda de JDKs actualizadas.');
+        this.refreshHtml();
+        return;
+      }
+      case 'manual': {
+        const value = await vscode.window.showInputBox({
+          title: 'Ruta al JDK (aemToolkit.javaHome)',
+          value: config.javaHome,
+          placeHolder: 'ej. C:\\Program Files\\Java\\jdk-17 — vacío para volver a la detección automática'
+        });
+        if (value === undefined) return;
+        await cfg.update('javaHome', value.trim(), vscode.ConfigurationTarget.Workspace);
+        vscode.window.showInformationMessage(
+          value.trim() ? 'JDK configurado manualmente.' : 'JDK manual eliminado — se vuelve a la detección automática.'
+        );
+        this.refreshHtml();
+        return;
+      }
+      case 'openSettings': {
+        await vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', { query: 'aemToolkit' });
+        return;
+      }
+    }
+  }
+
+  /**
+   * Envuelve una corrida (▶ Compilar, ⚡ Compilar sin tests, o cualquier acción rápida) para avisar
+   * al webview cuándo empieza y termina — así el ícono ▶ puede convertirse en ⏹ mientras corre y
+   * el resto de los botones se deshabilitan para no lanzar dos compilaciones a la vez.
+   */
+  private async runBusy(fn: () => Promise<void>): Promise<void> {
+    if (this.busy) {
+      vscode.window.showWarningMessage('Ya hay una compilación en curso — espera a que termine o detenla primero.');
+      return;
+    }
+    this.busy = true;
+    this.view?.webview.postMessage({ type: 'busy', busy: true });
+    try {
+      await fn();
+    } finally {
+      this.busy = false;
+      this.view?.webview.postMessage({ type: 'busy', busy: false });
+    }
+  }
+}
+
+function webviewShowEmpty(view: vscode.WebviewView): void {
+  view.webview.html = renderEmptyHtml();
+}
+
+function renderEmptyHtml(): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 16px; }
+  p { font-size: 12px; opacity: 0.8; }
+  button {
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none;
+    padding: 7px 14px; border-radius: 3px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+</style>
+</head>
+<body>
+  <p>Elige el proyecto AEM con el que quieres trabajar para ver el panel de compilación.</p>
+  <button id="pickBtn">📁 Elegir proyecto</button>
+  <script>
+    const vscode = acquireVsCodeApi();
+    document.getElementById('pickBtn').addEventListener('click', () => vscode.postMessage({ type: 'pickProject' }));
+  </script>
+</body>
+</html>`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+}
+
+function renderPanelHtml(project: AemProjectInfo, presets: CompilePreset[], javaBanner: string | undefined): string {
+  const profilesData = JSON.stringify(project.profiles).replace(/</g, '\\u003c');
+  const presetsData = JSON.stringify(presets).replace(/</g, '\\u003c');
+  const projectData = JSON.stringify({
+    hasFrontendModule: project.hasFrontendModule,
+    frontendTestScript: project.frontendTestScript ?? null,
+    frontendCoverageScript: project.frontendCoverageScript ?? null,
+    hasJacoco: project.hasJacoco
+  }).replace(/</g, '\\u003c');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 16px; max-width: 720px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px 0; }
+  section { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--vscode-editorWidget-border, #3c3c3c); }
+  section:last-of-type { border-bottom: none; }
+  label.field-label { display:block; font-size: 12px; opacity: 0.85; margin-bottom: 6px; font-weight: 600; }
+  select, input[type=text], input[type=number] {
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent); padding: 5px 8px; border-radius: 3px; font-size: 13px;
+  }
+  select#modo { width: 100%; padding: 7px 8px; font-size: 13px; }
+  .hint { font-size: 11px; opacity: 0.65; margin-top: 4px; }
+  .profiles-search { width: 100%; margin-bottom: 8px; box-sizing: border-box; }
+  .profile-row { display:flex; align-items:center; gap:8px; padding: 3px 0; }
+  .profile-row .src { opacity: 0.6; font-size: 11px; }
+  .checkbox-row { display:flex; align-items:center; gap:8px; margin: 6px 0; }
+  .deploy-row { display:flex; gap:14px; align-items:center; flex-wrap: wrap; margin-top: 8px; }
+  .deploy-row label { display:flex; align-items:center; gap:5px; font-size: 13px; }
+  button {
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none;
+    padding: 7px 14px; border-radius: 3px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+  button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+  button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+  .run-row { display:flex; gap:10px; align-items:center; }
+  .save-row { display:flex; gap:8px; align-items:center; }
+  .preset-list { margin-top: 8px; display:flex; flex-direction:column; gap:4px; }
+  .preset-item { display:flex; align-items:center; justify-content:space-between; font-size:12px; opacity:0.9; }
+  .preset-item .del { cursor:pointer; opacity:0.6; }
+  .preset-item .del:hover { opacity:1; color: var(--vscode-errorForeground); }
+  .disabled-note { font-size: 11px; opacity: 0.6; font-style: italic; }
+  .quick-toolbar { display:flex; flex-wrap: wrap; gap:6px; margin-bottom: 6px; }
+  .quick-btn {
+    background: transparent; color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-editorWidget-border, #3c3c3c); border-radius: 4px;
+    padding: 4px 8px; font-size: 15px; line-height: 1.2; cursor: pointer;
+  }
+  .quick-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
+  .quick-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .quick-btn.stop { background: var(--vscode-errorForeground, #f14c4c); border-color: var(--vscode-errorForeground, #f14c4c); color: #fff; }
+  .quick-btn.stop:hover { background: var(--vscode-errorForeground, #f14c4c); filter: brightness(1.15); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .java-banner {
+    background: var(--vscode-inputValidation-warningBackground, #664d03);
+    border: 1px solid var(--vscode-inputValidation-warningBorder, #a67f00);
+    color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+    padding: 8px 10px; border-radius: 4px; font-size: 12px; margin-bottom: 14px;
+  }
+</style>
+</head>
+<body>
+  <h2>AEM Toolkit — Compilar (${escapeHtml(project.namespace ?? path.basename(project.rootPath))})</h2>
+
+  ${javaBanner ? `<div class="java-banner">${escapeHtml(javaBanner)}</div>` : ''}
+
+  <section>
+    <label class="field-label">Acciones rápidas (estilo Maven de IntelliJ)</label>
+    <div class="quick-toolbar">
+      <button class="quick-btn" data-action="downloadDependencies" title="Descargar dependencias (mvn dependency:resolve)">📥</button>
+      <button class="quick-btn" data-action="generateSources" title="Generar sources y actualizar carpetas (mvn generate-sources)">🗂️</button>
+      <button class="quick-btn" data-action="compileWithTests" title="Compilar con los perfiles marcados abajo (reactor completo), con tests">▶</button>
+      <button class="quick-btn" data-action="compileSkipTests" title="Compilar con los perfiles marcados abajo (reactor completo), saltando los tests de back y de front">⚡</button>
+      <button class="quick-btn" data-action="clean" title="Limpiar (mvn clean)">🧹</button>
+      <button class="quick-btn" data-action="dependencyTree" title="Ver árbol de dependencias (mvn dependency:tree)">🌳</button>
+      <button class="quick-btn" data-action="analyzeDependencies" title="Analizar dependencias — declaradas sin usar / usadas sin declarar (mvn dependency:analyze)">🔍</button>
+      <button class="quick-btn" data-action="configureJdk" title="Configurar JDK: detectar de nuevo, carpetas de búsqueda, o a mano">⚙️</button>
+    </div>
+    <div class="hint">Usan los perfiles marcados abajo. 📥/🗂️/🧹/🌳/🔍 excluyen ui.frontend (igual que "Solo Back"); ▶/⚡ corren el reactor completo, con y sin tests. En un proyecto recién clonado, corre ▶ o "Completa" una vez antes de usar el resto. ⚙️ configura qué JDK usar.</div>
+  </section>
+
+  <section>
+    <label class="field-label" for="modo">Modo de compilación</label>
+    <select id="modo"></select>
+    <div id="modoHint" class="hint"></div>
+  </section>
+
+  <section id="profilesSection">
+    <label class="field-label">Perfiles Maven (checkboxes)</label>
+    <input type="text" id="profileSearch" class="profiles-search" placeholder="Filtrar perfiles..." />
+    <div id="profilesList"></div>
+  </section>
+
+  <section id="testsSection">
+    <label class="field-label">Tests</label>
+    <div id="skipFrontRow" class="checkbox-row" style="display:none">
+      <input type="checkbox" id="skipFrontendTests" />
+      <label for="skipFrontendTests">Saltar tests de Front<span id="frontTestScriptHint"></span></label>
+    </div>
+    <div id="skipBackRow" class="checkbox-row" style="display:none">
+      <input type="checkbox" id="skipBackendTests" />
+      <label for="skipBackendTests">Saltar tests de Back (-DskipTests)</label>
+    </div>
+    <div id="coverageNote" class="disabled-note" style="display:none"></div>
+  </section>
+
+  <section id="deploySection">
+    <label class="field-label">Destino (solo aplica si eliges un perfil de instalación)</label>
+    <div class="deploy-row">
+      <label><input type="radio" name="deploy" value="none" checked /> No aplica</label>
+      <label><input type="radio" name="deploy" value="author" /> Author</label>
+      <label><input type="radio" name="deploy" value="publish" /> Publish</label>
+      <span id="deployHostPortRow" style="display:none">
+        Host <input type="text" id="deployHost" value="localhost" style="width:110px" />
+        Puerto <input type="text" id="deployPort" value="4502" style="width:60px" />
+      </span>
+    </div>
+  </section>
+
+  <section>
+    <label class="field-label" for="extraArgs">Argumentos extra</label>
+    <input type="text" id="extraArgs" style="width:100%; box-sizing:border-box" placeholder="ej. -o para modo offline" />
+  </section>
+
+  <section>
+    <div class="run-row">
+      <button id="runBtn">▶ Compilar</button>
+      <div class="save-row">
+        <input type="text" id="presetName" placeholder="Nombre del modo a guardar" />
+        <button class="secondary" id="saveBtn">Guardar como modo personalizado</button>
+      </div>
+    </div>
+    <div id="presetList" class="preset-list"></div>
+  </section>
+
+<script>
+  const vscode = acquireVsCodeApi();
+  const project = ${projectData};
+  const allProfiles = ${profilesData}; // {id, sourceModule?}[]
+  let presets = ${presetsData};
+
+  const BASE_MODES = [
+    { value: 'base:full', label: 'Completa (front + back + tests)' },
+    { value: 'base:front', label: 'Solo Front', disabled: !project.hasFrontendModule },
+    { value: 'base:back', label: 'Solo Back' },
+    { value: 'base:coverage-front', label: 'Test-coverage Frontend' + (project.frontendCoverageScript ? '' : ' (no disponible)'), disabled: !project.frontendCoverageScript },
+    { value: 'base:coverage-back', label: 'Test-coverage Backend' }
+  ];
+
+  let checkedProfiles = new Set();
+  let currentBaseMode = 'full';
+
+  // Perfiles que cada modo base normalmente necesita para instalar en author/publish — se marcan
+  // solos al elegir el modo (y al cargar el panel con el modo por defecto), igual que hace IntelliJ.
+  const DEFAULT_PROFILES_BY_MODE = {
+    full: ['autoInstallBundle', 'autoInstallPackage'],
+    front: [],
+    back: ['autoInstallBundle', 'autoInstallPackage'],
+    'coverage-front': [],
+    'coverage-back': ['coverage']
+  };
+
+  // Aplica TODOS los valores por defecto de un modo base: perfiles marcados, skip-tests (front/back),
+  // argumentos extra y destino de despliegue. Se llama tanto al cargar el panel como al cambiar de
+  // modo en el select, para que nunca queden valores de un modo anterior "pegados" en la UI.
+  function applyModeDefaults(baseMode) {
+    const wanted = (DEFAULT_PROFILES_BY_MODE[baseMode] || []).filter(id => allProfiles.some(p => p.id === id));
+    checkedProfiles = new Set(wanted);
+    renderProfiles(document.getElementById('profileSearch').value);
+
+    document.getElementById('skipFrontendTests').checked = false;
+    document.getElementById('skipBackendTests').checked = false;
+    document.getElementById('extraArgs').value = '';
+
+    const radios = document.getElementsByName('deploy');
+    for (const r of radios) r.checked = (r.value === 'none');
+    document.getElementById('deployHost').value = 'localhost';
+    document.getElementById('deployPort').value = '4502';
+    updateDeployVisibility();
+  }
+
+  function baseModeOf(value) {
+    if (value.startsWith('base:')) return value.slice(5);
+    const preset = presets.find(p => 'preset:' + p.name === value);
+    return preset ? preset.baseMode : 'full';
+  }
+
+  function populateModoSelect() {
+    const sel = document.getElementById('modo');
+    sel.innerHTML = '';
+    const baseGroup = document.createElement('optgroup');
+    baseGroup.label = 'Modos base';
+    for (const m of BASE_MODES) {
+      const opt = document.createElement('option');
+      opt.value = m.value; opt.textContent = m.label;
+      if (m.disabled) opt.disabled = true;
+      baseGroup.appendChild(opt);
+    }
+    sel.appendChild(baseGroup);
+    if (presets.length > 0) {
+      const presetGroup = document.createElement('optgroup');
+      presetGroup.label = 'Modos personalizados';
+      for (const p of presets) {
+        const opt = document.createElement('option');
+        opt.value = 'preset:' + p.name; opt.textContent = p.name;
+        presetGroup.appendChild(opt);
+      }
+      sel.appendChild(presetGroup);
+    }
+  }
+
+  function renderProfiles(filter) {
+    const list = document.getElementById('profilesList');
+    list.innerHTML = '';
+    const f = (filter || '').toLowerCase();
+    for (const p of allProfiles) {
+      if (f && p.id.toLowerCase().indexOf(f) === -1) continue;
+      const row = document.createElement('div');
+      row.className = 'profile-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.id = 'profile_' + p.id; cb.checked = checkedProfiles.has(p.id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) checkedProfiles.add(p.id); else checkedProfiles.delete(p.id);
+      });
+      const label = document.createElement('label');
+      label.setAttribute('for', cb.id);
+      label.textContent = p.id;
+      row.appendChild(cb); row.appendChild(label);
+      if (p.sourceModule) {
+        const src = document.createElement('span');
+        src.className = 'src'; src.textContent = '(definido en ' + p.sourceModule + ')';
+        row.appendChild(src);
+      }
+      list.appendChild(row);
+    }
+    if (allProfiles.length === 0) {
+      list.innerHTML = '<div class="hint">Este proyecto no declara perfiles en su(s) pom.xml.</div>';
+    }
+  }
+
+  function updateVisibilityForMode(baseMode) {
+    currentBaseMode = baseMode;
+    const profilesSection = document.getElementById('profilesSection');
+    const deploySection = document.getElementById('deploySection');
+    const skipFrontRow = document.getElementById('skipFrontRow');
+    const skipBackRow = document.getElementById('skipBackRow');
+    const coverageNote = document.getElementById('coverageNote');
+    const frontHint = document.getElementById('frontTestScriptHint');
+
+    profilesSection.style.display = (baseMode === 'front' || baseMode === 'coverage-front') ? 'none' : '';
+    deploySection.style.display = (baseMode === 'full' || baseMode === 'back') ? '' : 'none';
+    skipFrontRow.style.display = ((baseMode === 'full' || baseMode === 'front') && project.frontendTestScript) ? '' : 'none';
+    skipBackRow.style.display = (baseMode === 'full' || baseMode === 'back') ? '' : 'none';
+    frontHint.textContent = project.frontendTestScript ? ' (npm run ' + project.frontendTestScript + ')' : '';
+
+    coverageNote.style.display = 'none';
+    if (baseMode === 'coverage-front') {
+      coverageNote.style.display = 'block';
+      coverageNote.textContent = project.frontendCoverageScript
+        ? 'Corre "npm run ' + project.frontendCoverageScript + '" y muestra el % de coverage por archivo.'
+        : 'Este proyecto no tiene un script de coverage en ui.frontend/package.json — este modo no está disponible.';
+    }
+    if (baseMode === 'coverage-back') {
+      coverageNote.style.display = 'block';
+      coverageNote.textContent = project.hasJacoco
+        ? 'Los tests de back son obligatorios para calcular coverage (no se pueden saltar). Si no hay cambios desde el último commit, solo se re-corren los tests; si hay cambios, se compila todo el back.'
+        : 'Este proyecto no tiene jacoco-maven-plugin configurado — se te ofrecerá agregarlo automáticamente al compilar.';
+    }
+
+  }
+
+  function loadPreset(preset) {
+    checkedProfiles = new Set(preset.profiles || []);
+    renderProfiles(document.getElementById('profileSearch').value);
+    document.getElementById('skipFrontendTests').checked = !!preset.skipFrontendTests;
+    document.getElementById('skipBackendTests').checked = !!preset.skipBackendTests;
+    document.getElementById('extraArgs').value = preset.extraArgs || '';
+    const radios = document.getElementsByName('deploy');
+    for (const r of radios) r.checked = (r.value === (preset.deployTarget || 'none'));
+    document.getElementById('deployHost').value = preset.deployHost || 'localhost';
+    document.getElementById('deployPort').value = preset.deployPort || '4502';
+    updateDeployVisibility();
+  }
+
+  function updateDeployVisibility() {
+    const target = document.querySelector('input[name=deploy]:checked').value;
+    document.getElementById('deployHostPortRow').style.display = target === 'none' ? 'none' : 'inline';
+    if (target === 'author' && document.getElementById('deployPort').value === '4503') document.getElementById('deployPort').value = '4502';
+    if (target === 'publish' && document.getElementById('deployPort').value === '4502') document.getElementById('deployPort').value = '4503';
+  }
+
+  function renderPresetList() {
+    const el = document.getElementById('presetList');
+    el.innerHTML = '';
+    for (const p of presets) {
+      const row = document.createElement('div');
+      row.className = 'preset-item';
+      row.innerHTML = '<span>⭐ ' + p.name + '</span>';
+      const del = document.createElement('span');
+      del.className = 'del'; del.textContent = '🗑 eliminar';
+      del.addEventListener('click', () => vscode.postMessage({ type: 'deletePreset', name: p.name }));
+      row.appendChild(del);
+      el.appendChild(row);
+    }
+  }
+
+  document.getElementById('modo').addEventListener('change', (e) => {
+    const value = e.target.value;
+    const bm = baseModeOf(value);
+    updateVisibilityForMode(bm);
+    if (value.startsWith('preset:')) {
+      const preset = presets.find(p => 'preset:' + p.name === value);
+      loadPreset(preset);
+    } else {
+      applyModeDefaults(bm);
+    }
+  });
+
+  document.getElementById('profileSearch').addEventListener('input', (e) => renderProfiles(e.target.value));
+  document.querySelectorAll('input[name=deploy]').forEach(r => r.addEventListener('change', updateDeployVisibility));
+
+  document.getElementById('runBtn').addEventListener('click', () => {
+    const deployTarget = document.querySelector('input[name=deploy]:checked').value;
+    const payload = {
+      baseMode: currentBaseMode,
+      profiles: [...checkedProfiles],
+      skipFrontendTests: document.getElementById('skipFrontendTests').checked,
+      skipBackendTests: document.getElementById('skipBackendTests').checked,
+      deploy: { target: deployTarget, host: document.getElementById('deployHost').value || 'localhost', port: document.getElementById('deployPort').value || '4502' },
+      extraArgs: document.getElementById('extraArgs').value
+    };
+    vscode.postMessage({ type: 'run', payload });
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', () => {
+    const name = document.getElementById('presetName').value.trim();
+    const deployTarget = document.querySelector('input[name=deploy]:checked').value;
+    const preset = {
+      name,
+      baseMode: currentBaseMode,
+      profiles: [...checkedProfiles],
+      skipFrontendTests: document.getElementById('skipFrontendTests').checked,
+      skipBackendTests: document.getElementById('skipBackendTests').checked,
+      deployTarget,
+      deployHost: document.getElementById('deployHost').value || 'localhost',
+      deployPort: document.getElementById('deployPort').value || '4502',
+      extraArgs: document.getElementById('extraArgs').value
+    };
+    vscode.postMessage({ type: 'savePreset', payload: preset });
+  });
+
+  // El ícono ▶ (compileWithTests) hace doble función: mientras no hay nada corriendo, lanza una
+  // compilación; mientras hay una corriendo, se convierte en ⏹ (recuadro rojo) para detenerla. El
+  // resto de los botones (otras acciones rápidas + el ▶ Compilar del wizard) se deshabilitan
+  // mientras tanto para no lanzar dos compilaciones a la vez.
+  let isBusy = false;
+  const playBtn = document.querySelector('.quick-btn[data-action="compileWithTests"]');
+  const PLAY_TITLE = playBtn.title;
+
+  function setBusy(busy) {
+    isBusy = busy;
+    document.querySelectorAll('.quick-btn').forEach(b => {
+      // El ⚙️ queda siempre habilitado: abrir el menú de configuración de JDK no interfiere con
+      // una compilación en curso.
+      if (b !== playBtn && b.dataset.action !== 'configureJdk') b.disabled = busy;
+    });
+    document.getElementById('runBtn').disabled = busy;
+    if (busy) {
+      playBtn.textContent = '⏹';
+      playBtn.classList.add('stop');
+      playBtn.title = 'Detener la compilación en curso';
+    } else {
+      playBtn.textContent = '▶';
+      playBtn.classList.remove('stop');
+      playBtn.title = PLAY_TITLE;
+    }
+  }
+
+  document.querySelectorAll('.quick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn === playBtn && isBusy) {
+        vscode.postMessage({ type: 'stopTask' });
+        return;
+      }
+      if (btn.disabled) return;
+      if (btn.dataset.action === 'configureJdk') {
+        vscode.postMessage({ type: 'configureJdk' });
+        return;
+      }
+      vscode.postMessage({
+        type: 'quickAction',
+        payload: { action: btn.dataset.action, profiles: [...checkedProfiles] }
+      });
+    });
+  });
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (msg.type === 'presetsUpdated') {
+      presets = msg.presets;
+      populateModoSelect();
+      renderPresetList();
+    }
+    if (msg.type === 'busy') {
+      setBusy(!!msg.busy);
+    }
+  });
+
+  populateModoSelect();
+  renderProfiles('');
+  renderPresetList();
+  updateVisibilityForMode('full');
+  applyModeDefaults('full');
+</script>
+</body>
+</html>`;
+}
